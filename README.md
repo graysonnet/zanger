@@ -1,22 +1,22 @@
 # Zanger
 
-Zanger is a fast, read-only terminal file explorer written in Rust. It utilizes a three-pane Terminal User Interface (TUI) to effortlessly navigate project hierarchies, read syntax-highlighted code, and search across deep structures while respecting `.gitignore`.
+Zanger is a fast, read-only terminal file explorer written in Rust. It provides a three-pane TUI to navigate project hierarchies, read syntax-highlighted code, and search across files while respecting `.gitignore`.
 
 ## UI Preview
 
 ```text
-┌ Files ─────────────────┐┌ Content: src/main.rs ────────────────────────────────────────┐
-│  ▼ src                 ││use crossterm::{                                              │
-│      app.rs            ││    event::{self, DisableMouseCapture, EnableMouseCapture, E  │
-│      explorer.rs       ││    execute,                                                  │
-│    ▶ main.rs           ││    terminal::{EnterAlternateScreen, LeaveAlternateScreen, d  │
-│      syntax.rs         ││};                                                            │
-│      ui.rs             ││use ratatui::{Terminal, backend::CrosstermBackend};           │
-│  ▶ docs                ││use std::{error::Error, io};                                  │
-│  .gitignore            ││                                                              │
-│  Cargo.lock            ││mod app;                                                      │
-│  Cargo.toml            ││mod explorer;                                                 │
-│  README.md             ││mod syntax;                                                   │
+┌ Files ─────────────────┐┌ Content: src/main.rs [Click to Copy] ───────────────────────┐
+│  ▶ .github             ││use crossterm::{                                              │
+│  ▶ docs                ││    event::{self, DisableMouseCapture, EnableMouseCapture, E  │
+│  ▶ src                 ││    execute,                                                  │
+│  .gitignore            ││    terminal::{EnterAlternateScreen, LeaveAlternateScreen, d  │
+│  Cargo.lock            ││};                                                            │
+│  Cargo.toml            ││use ratatui::{Terminal, backend::CrosstermBackend};           │
+│  CLAUDE.md             ││use std::{env, error::Error, io, path::PathBuf, process};    │
+│  README.md             ││                                                              │
+│                        ││mod app;                                                      │
+│                        ││mod explorer;                                                 │
+│                        ││mod syntax;                                                   │
 │                        ││mod ui;                                                       │
 │                        ││                                                              │
 │                        ││use app::App;                                                 │
@@ -24,42 +24,71 @@ Zanger is a fast, read-only terminal file explorer written in Rust. It utilizes 
 │                        ││fn main() -> Result<(), Box<dyn Error>> {                     │
 │                        ││    // setup terminal                                         │
 └────────────────────────┘└──────────────────────────────────────────────────────────────┘
-  NORMAL - '/' to search, 'Tab' to switch pane, 'Enter' to fold/expand, 'q' to quit 
+  NORMAL - '/' for file search, '?' for content search, 'Tab' to switch pane
 ```
 
 ## Features
-- **Tree View File Explorer:** Visually browse project files using collapsible nested directories.
-- **Dynamic Syntax Highlighting:** Powered by `syntect` mapping directly to `ratatui` layouts. Seamlessly reads almost any code format natively using `base16-ocean.dark` theme.
-- **Smart Ignored File Handling:** Fast filesystem walking utilizing the `ignore` crate, meaning `target/`, `node_modules/`, and other `.gitignore` defined items are naturally skipped.
-- **Cross-Platform:** Out of the box support for Unix, Linux, macOS, and Windows.
-- **Fuzzy Search Mode:** Instantly filter visible project files.
+
+- **Tree View File Explorer** — Collapsible nested directories with fold/expand support.
+- **Syntax Highlighting** — Powered by `syntect` with the `base16-ocean.dark` theme. Supports all major languages out of the box.
+- **File Name Search** (`/`) — Instantly filter the file tree by path.
+- **Content Search** (`?`) — Fast ripgrep-like deep content search powered by `rayon` parallel processing and `bstr` byte matching.
+- **Search Result Highlighting** — Matched keywords are highlighted with a red background in the content pane.
+- **Match Navigation** — Use `n`/`N` to jump between content search matches within a file.
+- **Clipboard Support** — Click the title bar to copy the file path. Drag-select text to copy code to clipboard.
+- **Mouse Scroll** — Scroll content with your mouse wheel.
+- **Smart `.gitignore` Handling** — Automatically skips `target/`, `node_modules/`, and other ignored paths.
+- **Cross-Platform** — Runs natively on Linux, macOS, and Windows (x86_64 and ARM64).
 
 ## Installation
-Ensure you have `cargo` and the Rust toolchain installed:
+
+### From source
 ```sh
-cargo build --release
+cargo install --path .
 ```
-To run directly:
+
+### Usage
 ```sh
-cargo run
+zanger              # Explore current directory
+zanger /path/to/dir # Explore a specific directory
+zanger --help       # Show help
+zanger --version    # Show version
 ```
 
 ## Keybindings
 
-### Global Context
-- `q` — Quit the application
-- `Tab` — Switch focus between the File Explorer pane and the Content pane
+### Navigation
+| Key | Action |
+|-----|--------|
+| `q` | Quit |
+| `Tab` | Switch focus between file list and content pane |
+| `j` / `Down` | Navigate down (file list) or scroll down (content) |
+| `k` / `Up` | Navigate up (file list) or scroll up (content) |
+| `PageDown` | Scroll content down by 10 lines |
+| `PageUp` | Scroll content up by 10 lines |
+| `Enter` / `Space` | Toggle fold/expand selected directory |
+| `za` | Toggle fold/expand all directories |
 
-### File Explorer Pane Active (Left)
-- `Up` (`k`) / `Down` (`j`) — Navigate up and down the file list
-- `Enter` (`Space`) — Toggle expanding or collapsing the current directory
-- `/` — Enter Search mode to filter the file list
+### Search
+| Key | Action |
+|-----|--------|
+| `/` | Enter file name search mode |
+| `?` | Enter content search mode |
+| `n` | Jump to next content match |
+| `N` | Jump to previous content match |
+| `Esc` / `Enter` | Exit search mode |
 
-### Content Pane Active (Right)
-- `Up` (`k`) / `Down` (`j`) — Scroll text up and down by one line
-- `PageUp` / `PageDown` — Scroll text up and down by 10 lines
+### Mouse
+| Action | Effect |
+|--------|--------|
+| Click title bar | Copy file path to clipboard |
+| Drag select | Copy selected lines to clipboard |
+| Scroll wheel | Scroll content up/down |
 
-### Search Mode
-- Type any characters — Filter file list dynamically
-- `Backspace` — Delete previous character
-- `Esc` / `Enter` — Exit search mode and return to file navigation
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) for details on the module structure.
+
+## License
+
+MIT

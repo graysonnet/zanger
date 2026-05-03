@@ -26,10 +26,9 @@ impl FileExplorer {
         }
     }
 
-    pub fn refresh(&mut self) {
+    pub fn refresh(&mut self, root: &Path) {
         self.all_items.clear();
-        // Use "." instead of "./" for better OS compatibility
-        let walker = WalkBuilder::new(".").hidden(false).build();
+        let walker = WalkBuilder::new(root).hidden(false).build();
 
         for result in walker.filter_map(Result::ok) {
             let is_dir = result.file_type().map_or(false, |ft| ft.is_dir());
