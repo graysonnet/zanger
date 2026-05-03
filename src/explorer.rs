@@ -84,4 +84,18 @@ impl FileExplorer {
             self.collapsed_dirs.insert(path.to_path_buf());
         }
     }
+
+    pub fn toggle_all_dirs(&mut self) {
+        if self.collapsed_dirs.is_empty() {
+            // Collapse all
+            for item in &self.all_items {
+                if item.is_dir {
+                    self.collapsed_dirs.insert(item.path.clone());
+                }
+            }
+        } else {
+            // Expand all
+            self.collapsed_dirs.clear();
+        }
+    }
 }

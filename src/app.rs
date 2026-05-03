@@ -58,12 +58,8 @@ impl App {
                     }
                     KeyCode::Char('a') if self.last_key_z => {
                         if self.focus == PaneFocus::FileList {
-                            if let Some(item) = self.explorer.visible_items.get(self.selected_index).cloned() {
-                                if item.is_dir {
-                                    self.explorer.toggle_dir(&item.path);
-                                    self.update_search();
-                                }
-                            }
+                            self.explorer.toggle_all_dirs();
+                            self.update_search();
                         }
                     }
                     KeyCode::Char('/') => {
