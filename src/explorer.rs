@@ -1,5 +1,8 @@
 use ignore::WalkBuilder;
+use rayon::prelude::*;
+use bstr::ByteSlice;
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
@@ -49,18 +52,54 @@ impl FileExplorer {
     pub fn update_visible(&mut self, search_query: &str) {
         self.visible_items.clear();
         let is_search = !search_query.is_empty();
-        let query_lower = search_query.to_lowercase();
 
-        let mut skip_prefix: Option<PathBuf> = None;
+        if is_search {
+            let query_lower = search_query.to_lowercase();
+            let query_bytes = query_lower.as_bytes();
 
-        for item in &self.all_items {
-            let path_str = item.path.display().to_string();
-
-            if is_search {
-                if path_str.to_lowercase().contains(&query_lower) && !item.is_dir {
-                    self.visible_items.push(item.clone());
+            let matched: Vec<FileItem> = self.all_items.par_iter().filter(|item| {
+                if item.is_dir {
+                    return false;
                 }
-            } else {
+
+                let path_str = item.path.display().to_string().to_lowercase();
+
+                // Fast path match
+                if path_str.contains(&query_lower) {
+                    return true;
+                }
+
+                // If path doesn't match, attempt content match.
+                // To avoid hanging the TUI, we only read files < 10MB
+                if let Ok(metadata) = std::fs::metadata(&item.path) {
+                    if metadata.len() > 10 * 1024 * 1024 {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+
+                if let Ok(content) = fs::read(&item.path) {
+                    // Fast memmem sub-byte search
+                    if content.find(query_bytes).is_some() {
+                        return true;
+                    }
+
+                    // Case-insensitive fallback for content (slower but necessary if query was text)
+                    if content.to_ascii_lowercase().find(query_bytes).is_some() {
+                        return true;
+                    }
+                }
+
+                false
+            }).cloned().collect();
+
+            self.visible_items.extend(matched);
+
+        } else {
+            let mut skip_prefix: Option<PathBuf> = None;
+
+            for item in &self.all_items {
                 if let Some(ref prefix) = skip_prefix {
                     if item.path.starts_with(prefix) {
                         continue;
