@@ -2,6 +2,31 @@
 
 Zanger is a fast, read-only terminal file explorer written in Rust. It utilizes a three-pane Terminal User Interface (TUI) to effortlessly navigate project hierarchies, read syntax-highlighted code, and search across deep structures while respecting `.gitignore`.
 
+## UI Preview
+
+```text
+┌ Files ─────────────────┐┌ Content: src/main.rs ────────────────────────────────────────┐
+│  ▼ src                 ││use crossterm::{                                              │
+│      app.rs            ││    event::{self, DisableMouseCapture, EnableMouseCapture, E  │
+│      explorer.rs       ││    execute,                                                  │
+│    ▶ main.rs           ││    terminal::{EnterAlternateScreen, LeaveAlternateScreen, d  │
+│      syntax.rs         ││};                                                            │
+│      ui.rs             ││use ratatui::{Terminal, backend::CrosstermBackend};           │
+│  ▶ docs                ││use std::{error::Error, io};                                  │
+│  .gitignore            ││                                                              │
+│  Cargo.lock            ││mod app;                                                      │
+│  Cargo.toml            ││mod explorer;                                                 │
+│  README.md             ││mod syntax;                                                   │
+│                        ││mod ui;                                                       │
+│                        ││                                                              │
+│                        ││use app::App;                                                 │
+│                        ││                                                              │
+│                        ││fn main() -> Result<(), Box<dyn Error>> {                     │
+│                        ││    // setup terminal                                         │
+└────────────────────────┘└──────────────────────────────────────────────────────────────┘
+  NORMAL - '/' to search, 'Tab' to switch pane, 'Enter' to fold/expand, 'q' to quit 
+```
+
 ## Features
 - **Tree View File Explorer:** Visually browse project files using collapsible nested directories.
 - **Dynamic Syntax Highlighting:** Powered by `syntect` mapping directly to `ratatui` layouts. Seamlessly reads almost any code format natively using `base16-ocean.dark` theme.
