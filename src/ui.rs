@@ -40,7 +40,7 @@ fn draw_file_list(f: &mut Frame, app: &mut App, area: Rect) {
                 }
             }
 
-            let text = if app.search_query.is_empty() {
+            let text = if app.file_search_query.is_empty() && app.content_search_query.is_empty() {
                 // Calculate folder depth for indentation (subtracting 1 for the root dir "." offset)
                 let depth = item.path.components().count().saturating_sub(1);
                 let prefix = "  ".repeat(depth);
@@ -100,7 +100,7 @@ fn draw_file_content(f: &mut Frame, app: &App, area: Rect) {
         format!(" Content: {} ", title_path)
     };
 
-    let lines = app.highlighter.get_lines();
+    let lines = app.highlighter.get_lines_with_highlight(&app.content_search_query);
     let text: Vec<Line> = lines.into_iter().map(Line::from).collect();
 
     let content = Paragraph::new(text)
@@ -113,13 +113,15 @@ fn draw_file_content(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let status_text = match app.mode {
-        AppMode::Normal => " NORMAL - '/' to search, 'Tab' to switch pane, 'Enter' to fold/expand, 'q' to quit ".to_string(),
-        AppMode::Search => format!(" SEARCH - Type to filter files, Enter/Esc to clear: {}_", app.search_query),
+        AppMode::Normal => " NORMAL - '/' for file search, '?' for content search, 'Tab' to switch pane ".to_string(),
+        AppMode::FileSearch => format!(" FILE SEARCH - Type to filter files, Enter/Esc to clear: {}_", app.file_search_query),
+        AppMode::ContentSearch => format!(" CONTENT SEARCH - Deep search files, Enter/Esc to clear: {}_", app.content_search_query),
     };
 
     let color = match app.mode {
         AppMode::Normal => Color::Blue,
-        AppMode::Search => Color::Red,
+        AppMode::FileSearch => Color::Yellow,
+        AppMode::ContentSearch => Color::Red,
     };
 
     let paragraph = Paragraph::new(status_text)

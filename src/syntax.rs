@@ -2,6 +2,7 @@ use ratatui::{
     style::{Color, Style},
     text::Span,
 };
+use regex::RegexBuilder;
 use std::{fs, path::Path};
 use syntect::{
     easy::HighlightLines,
@@ -25,8 +26,59 @@ impl SyntaxHighlighter {
         }
     }
 
-    pub fn get_lines(&self) -> Vec<Vec<Span<'static>>> {
-        self.current_lines.clone()
+    pub fn get_lines_with_highlight(&self, content_search_query: &str) -> Vec<Vec<Span<'static>>> {
+        if content_search_query.is_empty() {
+            return self.current_lines.clone();
+        }
+
+        // Build a case-insensitive regex for the search query to safely slice spans
+        let re = RegexBuilder::new(&regex::escape(content_search_query))
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+
+        let mut processed_lines = Vec::with_capacity(self.current_lines.len());
+
+        for line_spans in &self.current_lines {
+            let mut new_spans = Vec::new();
+
+            for span in line_spans {
+                let text = &span.content;
+
+                // If it doesn't contain the query at all, copy it fast
+                if !re.is_match(text) {
+                    new_spans.push(span.clone());
+                    continue;
+                }
+
+                // If it does, we split the span preserving the exact foreground colors
+                // but layering a red background over the match.
+                let mut last_end = 0;
+                for mat in re.find_iter(text) {
+                    if mat.start() > last_end {
+                        let prefix = &text[last_end..mat.start()];
+                        new_spans.push(Span::styled(prefix.to_string(), span.style));
+                    }
+
+                    let match_text = &text[mat.start()..mat.end()];
+                    new_spans.push(Span::styled(
+                        match_text.to_string(),
+                        span.style.bg(Color::Red).fg(Color::White), // Highlight!
+                    ));
+
+                    last_end = mat.end();
+                }
+
+                if last_end < text.len() {
+                    let suffix = &text[last_end..];
+                    new_spans.push(Span::styled(suffix.to_string(), span.style));
+                }
+            }
+
+            processed_lines.push(new_spans);
+        }
+
+        processed_lines
     }
 
     pub fn load_file(&mut self, path: &Path) {

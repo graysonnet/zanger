@@ -49,13 +49,14 @@ impl FileExplorer {
         self.all_items.sort_by(|a, b| a.path.cmp(&b.path));
     }
 
-    pub fn update_visible(&mut self, search_query: &str) {
+    pub fn update_visible(&mut self, file_query: &str, content_query: &str) {
         self.visible_items.clear();
-        let is_search = !search_query.is_empty();
+        let is_search = !file_query.is_empty() || !content_query.is_empty();
 
         if is_search {
-            let query_lower = search_query.to_lowercase();
-            let query_bytes = query_lower.as_bytes();
+            let file_query_lower = file_query.to_lowercase();
+            let content_query_lower = content_query.to_lowercase();
+            let content_query_bytes = content_query_lower.as_bytes();
 
             let matched: Vec<FileItem> = self.all_items.par_iter().filter(|item| {
                 if item.is_dir {
@@ -64,34 +65,36 @@ impl FileExplorer {
 
                 let path_str = item.path.display().to_string().to_lowercase();
 
-                // Fast path match
-                if path_str.contains(&query_lower) {
-                    return true;
-                }
-
-                // If path doesn't match, attempt content match.
-                // To avoid hanging the TUI, we only read files < 10MB
-                if let Ok(metadata) = std::fs::metadata(&item.path) {
-                    if metadata.len() > 10 * 1024 * 1024 {
-                        return false;
-                    }
-                } else {
+                // 1. File constraint
+                if !file_query.is_empty() && !path_str.contains(&file_query_lower) {
                     return false;
                 }
 
-                if let Ok(content) = fs::read(&item.path) {
-                    // Fast memmem sub-byte search
-                    if content.find(query_bytes).is_some() {
-                        return true;
+                // 2. Content constraint
+                if !content_query.is_empty() {
+                    // Check file isn't massive
+                    if let Ok(metadata) = std::fs::metadata(&item.path) {
+                        if metadata.len() > 10 * 1024 * 1024 {
+                            return false;
+                        }
+                    } else {
+                        return false;
                     }
 
-                    // Case-insensitive fallback for content (slower but necessary if query was text)
-                    if content.to_ascii_lowercase().find(query_bytes).is_some() {
-                        return true;
+                    if let Ok(content) = fs::read(&item.path) {
+                        // Priority 1: match raw exact
+                        if content.find(content_query_bytes).is_none() {
+                            // Priority 2: match ascii lowercase
+                            if content.to_ascii_lowercase().find(content_query_bytes).is_none() {
+                                return false; // Doesn't match content constraint
+                            }
+                        }
+                    } else {
+                        return false; // Can't read, fail content match
                     }
                 }
 
-                false
+                true // Survived all filters!
             }).cloned().collect();
 
             self.visible_items.extend(matched);

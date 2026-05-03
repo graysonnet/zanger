@@ -2066,6 +2066,7 @@ dependencies = [
  "ignore",
  "ratatui",
  "rayon",
+ "regex",
  "syntect",
 ]
 

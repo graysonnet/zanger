@@ -5,7 +5,8 @@ use crate::syntax::SyntaxHighlighter;
 #[derive(PartialEq)]
 pub enum AppMode {
     Normal,
-    Search,
+    FileSearch,
+    ContentSearch,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -18,7 +19,8 @@ pub struct App {
     pub should_quit: bool,
     pub mode: AppMode,
     pub focus: PaneFocus,
-    pub search_query: String,
+    pub file_search_query: String,
+    pub content_search_query: String,
     pub explorer: FileExplorer,
     pub highlighter: SyntaxHighlighter,
     pub selected_index: usize,
@@ -30,13 +32,14 @@ impl App {
     pub fn new() -> Self {
         let mut explorer = FileExplorer::new();
         explorer.refresh();
-        explorer.update_visible("");
+        explorer.update_visible("", "");
 
         let mut app = Self {
             should_quit: false,
             mode: AppMode::Normal,
             focus: PaneFocus::FileList,
-            search_query: String::new(),
+            file_search_query: String::new(),
+            content_search_query: String::new(),
             explorer,
             highlighter: SyntaxHighlighter::new(),
             selected_index: 0,
@@ -63,7 +66,11 @@ impl App {
                         }
                     }
                     KeyCode::Char('/') => {
-                        self.mode = AppMode::Search;
+                        self.mode = AppMode::FileSearch;
+                        self.focus = PaneFocus::FileList;
+                    }
+                    KeyCode::Char('?') => {
+                        self.mode = AppMode::ContentSearch;
                         self.focus = PaneFocus::FileList;
                     }
                     KeyCode::Tab => {
@@ -111,15 +118,26 @@ impl App {
                 }
                 self.last_key_z = false;
             }
-            AppMode::Search => match key.code {
-
+            AppMode::FileSearch => match key.code {
                 KeyCode::Esc | KeyCode::Enter => self.mode = AppMode::Normal,
                 KeyCode::Char(c) => {
-                    self.search_query.push(c);
+                    self.file_search_query.push(c);
                     self.update_search();
                 }
                 KeyCode::Backspace => {
-                    self.search_query.pop();
+                    self.file_search_query.pop();
+                    self.update_search();
+                }
+                _ => {}
+            },
+            AppMode::ContentSearch => match key.code {
+                KeyCode::Esc | KeyCode::Enter => self.mode = AppMode::Normal,
+                KeyCode::Char(c) => {
+                    self.content_search_query.push(c);
+                    self.update_search();
+                }
+                KeyCode::Backspace => {
+                    self.content_search_query.pop();
                     self.update_search();
                 }
                 _ => {}
@@ -128,7 +146,7 @@ impl App {
     }
 
     fn update_search(&mut self) {
-        self.explorer.update_visible(&self.search_query);
+        self.explorer.update_visible(&self.file_search_query, &self.content_search_query);
         // Ensure index doesn't go out of bounds after filtering
         if self.selected_index >= self.explorer.visible_items.len() {
             self.selected_index = self.explorer.visible_items.len().saturating_sub(1);
