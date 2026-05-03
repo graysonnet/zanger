@@ -37,6 +37,10 @@ impl FileExplorer {
                 continue;
             }
 
+            if is_dir {
+                self.collapsed_dirs.insert(path.clone());
+            }
+
             self.all_items.push(FileItem { path, is_dir });
         }
         self.all_items.sort_by(|a, b| a.path.cmp(&b.path));

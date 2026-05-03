@@ -23,6 +23,7 @@ pub struct App {
     pub highlighter: SyntaxHighlighter,
     pub selected_index: usize,
     pub content_scroll: u16,
+    pub last_key_z: bool,
 }
 
 impl App {
@@ -40,6 +41,7 @@ impl App {
             highlighter: SyntaxHighlighter::new(),
             selected_index: 0,
             content_scroll: 0,
+            last_key_z: false,
         };
         app.load_selected_file();
         app
@@ -47,56 +49,74 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyEvent) {
         match self.mode {
-            AppMode::Normal => match key.code {
-                KeyCode::Char('q') => self.should_quit = true,
-                KeyCode::Char('/') => {
-                    self.mode = AppMode::Search;
-                    self.focus = PaneFocus::FileList;
-                }
-                KeyCode::Tab => {
-                    self.focus = if self.focus == PaneFocus::FileList {
-                        PaneFocus::Content
-                    } else {
-                        PaneFocus::FileList
-                    };
-                }
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    if self.focus == PaneFocus::FileList {
-                        if let Some(item) = self.explorer.visible_items.get(self.selected_index).cloned() {
-                            if item.is_dir {
-                                self.explorer.toggle_dir(&item.path);
-                                self.update_search(); // Rebuilds visible_items
+            AppMode::Normal => {
+                match key.code {
+                    KeyCode::Char('q') => self.should_quit = true,
+                    KeyCode::Char('z') => {
+                        self.last_key_z = true;
+                        return; // Return early so we don't reset last_key_z
+                    }
+                    KeyCode::Char('a') if self.last_key_z => {
+                        if self.focus == PaneFocus::FileList {
+                            if let Some(item) = self.explorer.visible_items.get(self.selected_index).cloned() {
+                                if item.is_dir {
+                                    self.explorer.toggle_dir(&item.path);
+                                    self.update_search();
+                                }
                             }
                         }
                     }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if self.focus == PaneFocus::FileList {
-                        self.next_file();
-                    } else {
-                        self.content_scroll = self.content_scroll.saturating_add(1);
+                    KeyCode::Char('/') => {
+                        self.mode = AppMode::Search;
+                        self.focus = PaneFocus::FileList;
                     }
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if self.focus == PaneFocus::FileList {
-                        self.previous_file();
-                    } else {
-                        self.content_scroll = self.content_scroll.saturating_sub(1);
+                    KeyCode::Tab => {
+                        self.focus = if self.focus == PaneFocus::FileList {
+                            PaneFocus::Content
+                        } else {
+                            PaneFocus::FileList
+                        };
                     }
-                }
-                KeyCode::PageDown => {
-                    if self.focus == PaneFocus::Content {
-                        self.content_scroll = self.content_scroll.saturating_add(10);
+                    KeyCode::Enter | KeyCode::Char(' ') => {
+                        if self.focus == PaneFocus::FileList {
+                            if let Some(item) = self.explorer.visible_items.get(self.selected_index).cloned() {
+                                if item.is_dir {
+                                    self.explorer.toggle_dir(&item.path);
+                                    self.update_search(); // Rebuilds visible_items
+                                }
+                            }
+                        }
                     }
-                }
-                KeyCode::PageUp => {
-                    if self.focus == PaneFocus::Content {
-                        self.content_scroll = self.content_scroll.saturating_sub(10);
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if self.focus == PaneFocus::FileList {
+                            self.next_file();
+                        } else {
+                            self.content_scroll = self.content_scroll.saturating_add(1);
+                        }
                     }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if self.focus == PaneFocus::FileList {
+                            self.previous_file();
+                        } else {
+                            self.content_scroll = self.content_scroll.saturating_sub(1);
+                        }
+                    }
+                    KeyCode::PageDown => {
+                        if self.focus == PaneFocus::Content {
+                            self.content_scroll = self.content_scroll.saturating_add(10);
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        if self.focus == PaneFocus::Content {
+                            self.content_scroll = self.content_scroll.saturating_sub(10);
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+                self.last_key_z = false;
+            }
             AppMode::Search => match key.code {
+
                 KeyCode::Esc | KeyCode::Enter => self.mode = AppMode::Normal,
                 KeyCode::Char(c) => {
                     self.search_query.push(c);
