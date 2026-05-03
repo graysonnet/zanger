@@ -38,11 +38,6 @@ fn print_help() {
     println!("    ?              Content search (ripgrep-like)");
     println!("    n/N            Jump to next/previous content match");
     println!("    PageUp/Down    Scroll content by 10 lines");
-    println!();
-    println!("MOUSE:");
-    println!("    Click title    Copy file path to clipboard");
-    println!("    Drag select    Copy selected text to clipboard");
-    println!("    Scroll wheel   Scroll content");
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -109,8 +104,6 @@ fn run_app(
             if key.kind == KeyEventKind::Press {
                 app.handle_key(key);
             }
-        } else if let Event::Mouse(mouse_event) = ev {
-            app.handle_mouse(mouse_event);
         }
 
         if app.should_quit {

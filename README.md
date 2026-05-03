@@ -35,9 +35,6 @@ Zanger is a fast, read-only terminal file explorer written in Rust. It provides 
 - **Content Search** (`?`) — Fast ripgrep-like deep content search powered by `rayon` parallel processing and `bstr` byte matching.
 - **Search Result Highlighting** — Matched keywords are highlighted with a red background in the content pane.
 - **Match Navigation** — Use `n`/`N` to jump between content search matches within a file.
-- **Clipboard Support** — Click the title bar to copy the file path. Drag-select text to copy code to clipboard.
-- **Mouse Scroll** — Scroll content with your mouse wheel.
-- **Smart `.gitignore` Handling** — Automatically skips `target/`, `node_modules/`, and other ignored paths.
 - **Cross-Platform** — Runs natively on Linux, macOS, and Windows (x86_64 and ARM64).
 
 ## Installation
@@ -77,13 +74,6 @@ zanger --version    # Show version
 | `n` | Jump to next content match |
 | `N` | Jump to previous content match |
 | `Esc` / `Enter` | Exit search mode |
-
-### Mouse
-| Action | Effect |
-|--------|--------|
-| Click title bar | Copy file path to clipboard |
-| Drag select | Copy selected lines to clipboard |
-| Scroll wheel | Scroll content up/down |
 
 ## Architecture
 
