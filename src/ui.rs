@@ -120,8 +120,8 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
     let color = match app.mode {
         AppMode::Normal => Color::Blue,
-        AppMode::FileSearch => Color::Yellow,
-        AppMode::ContentSearch => Color::Red,
+        AppMode::FileSearch => Color::Green,
+        AppMode::ContentSearch => Color::Green,
     };
 
     let paragraph = Paragraph::new(status_text)
