@@ -1,0 +1,11 @@
+[package]
+name = "zanger"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossbeam-channel = "0.5.15"
+crossterm = "0.29.0"
+ignore = "0.4.25"
+ratatui = "0.30.0"
+syntect = "5.3.0"
