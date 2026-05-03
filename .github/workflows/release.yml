@@ -21,6 +21,14 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact_name: zanger.exe
             asset_name: zanger-windows-x86_64.zip
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: zanger
+            asset_name: zanger-macos-x86_64.tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: zanger
+            asset_name: zanger-macos-arm64.tar.gz
 
     steps:
       - name: Checkout code
@@ -39,6 +47,13 @@ jobs:
 
       - name: Package Linux artifact
         if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czvf ../../../${{ matrix.asset_name }} ${{ matrix.artifact_name }}
+          cd ../../../
+
+      - name: Package macOS artifact
+        if: matrix.os == 'macos-latest'
         run: |
           cd target/${{ matrix.target }}/release
           tar czvf ../../../${{ matrix.asset_name }} ${{ matrix.artifact_name }}
