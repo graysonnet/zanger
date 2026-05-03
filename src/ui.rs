@@ -1,13 +1,12 @@
 use ratatui::{
-    backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Line},
+    text::Line,
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
-use crate::app::{App, AppMode};
+use crate::app::{App, AppMode, PaneFocus};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -28,32 +27,85 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 fn draw_file_list(f: &mut Frame, app: &mut App, area: Rect) {
     let items: Vec<ListItem> = app
         .explorer
-        .files
+        .visible_items
         .iter()
         .enumerate()
-        .map(|(i, path)| {
-            let style = if i == app.selected_index {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        .map(|(i, item)| {
+            let mut style = Style::default();
+            if i == app.selected_index {
+                if app.focus == PaneFocus::FileList {
+                    style = style.bg(Color::DarkGray).fg(Color::Yellow).add_modifier(Modifier::BOLD);
+                } else {
+                    style = style.fg(Color::Yellow).add_modifier(Modifier::BOLD);
+                }
+            }
+
+            let text = if app.search_query.is_empty() {
+                // Calculate folder depth for indentation (subtracting 1 for the root dir "." offset)
+                let depth = item.path.components().count().saturating_sub(1);
+                let prefix = "  ".repeat(depth);
+                let name = item.path.file_name().unwrap_or_default().to_string_lossy();
+
+                let icon = if item.is_dir {
+                    if app.explorer.collapsed_dirs.contains(&item.path) {
+                        "▶"
+                    } else {
+                        "▼"
+                    }
+                } else {
+                    " "
+                };
+
+                format!("{}{} {}", prefix, icon, name)
             } else {
-                Style::default()
+                item.path.display().to_string()
             };
-            ListItem::new(path.display().to_string()).style(style)
+
+            ListItem::new(text).style(style)
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Files "));
+    let border_style = if app.focus == PaneFocus::FileList {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::White)
+    };
 
-    f.render_widget(list, area);
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).border_style(border_style).title(" Files "));
+
+    // Use ListState to automatically scroll the tree when navigating out of bounds
+    let mut state = ListState::default();
+    state.select(Some(app.selected_index));
+    f.render_stateful_widget(list, area, &mut state);
 }
 
 fn draw_file_content(f: &mut Frame, app: &App, area: Rect) {
-    let lines = app.highlighter.get_lines();
+    let border_style = if app.focus == PaneFocus::Content {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::White)
+    };
 
+    let title_path = app
+        .explorer
+        .visible_items
+        .get(app.selected_index)
+        .map(|item| item.path.display().to_string())
+        .unwrap_or_default();
+
+    let title = if title_path.is_empty() {
+        " Content ".to_string()
+    } else {
+        format!(" Content: {} ", title_path)
+    };
+
+    let lines = app.highlighter.get_lines();
     let text: Vec<Line> = lines.into_iter().map(Line::from).collect();
 
     let content = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title(format!(" Content: {} ", app.explorer.files.get(app.selected_index).map(|p| p.display().to_string()).unwrap_or_else(|| "".to_string()))))
+        .scroll((app.content_scroll, 0))
+        .block(Block::default().borders(Borders::ALL).border_style(border_style).title(title))
         .wrap(Wrap { trim: false });
 
     f.render_widget(content, area);
@@ -61,8 +113,8 @@ fn draw_file_content(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let status_text = match app.mode {
-        AppMode::Normal => " NORMAL - Press '/' to search, 'q' to quit, Up/Down to navigate ".to_string(),
-        AppMode::Search => format!(" SEARCH - Type to filter, Enter/Esc to clear: {}_", app.search_query),
+        AppMode::Normal => " NORMAL - '/' to search, 'Tab' to switch pane, 'Enter' to fold/expand, 'q' to quit ".to_string(),
+        AppMode::Search => format!(" SEARCH - Type to filter files, Enter/Esc to clear: {}_", app.search_query),
     };
 
     let color = match app.mode {

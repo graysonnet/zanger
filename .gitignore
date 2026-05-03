@@ -1,1 +1,7 @@
 /target
+/target/
+/.claude/
+/.agents/
+/.scratch/
+**/*.rs.bk
+Cargo.lock
