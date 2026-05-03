@@ -26,16 +26,38 @@ impl SyntaxHighlighter {
         }
     }
 
+    pub fn find_match_lines(&self, query: &str) -> Vec<usize> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+
+        let Ok(re) = RegexBuilder::new(&regex::escape(query)).case_insensitive(true).build() else {
+            return Vec::new();
+        };
+
+        let mut lines = Vec::new();
+        for (i, line_spans) in self.current_lines.iter().enumerate() {
+            for span in line_spans {
+                if re.is_match(&span.content) {
+                    lines.push(i);
+                    break;
+                }
+            }
+        }
+        lines
+    }
+
     pub fn get_lines_with_highlight(&self, content_search_query: &str) -> Vec<Vec<Span<'static>>> {
         if content_search_query.is_empty() {
             return self.current_lines.clone();
         }
 
         // Build a case-insensitive regex for the search query to safely slice spans
-        let re = RegexBuilder::new(&regex::escape(content_search_query))
+        let Ok(re) = RegexBuilder::new(&regex::escape(content_search_query))
             .case_insensitive(true)
-            .build()
-            .unwrap();
+            .build() else {
+                return self.current_lines.clone();
+            };
 
         let mut processed_lines = Vec::with_capacity(self.current_lines.len());
 

@@ -90,6 +90,22 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('N') => {
+                        let matches = self.highlighter.find_match_lines(&self.content_search_query);
+                        if let Some(&last_smaller) = matches.iter().rev().find(|&&i| i < self.content_scroll as usize) {
+                            self.content_scroll = last_smaller as u16;
+                        } else if let Some(&last) = matches.last() {
+                            self.content_scroll = last as u16; // wrap around
+                        }
+                    }
+                    KeyCode::Char('n') => {
+                        let matches = self.highlighter.find_match_lines(&self.content_search_query);
+                        if let Some(&first_greater) = matches.iter().find(|&&i| i > self.content_scroll as usize) {
+                            self.content_scroll = first_greater as u16;
+                        } else if let Some(&first) = matches.first() {
+                            self.content_scroll = first as u16; // wrap around
+                        }
+                    }
                     KeyCode::Down | KeyCode::Char('j') => {
                         if self.focus == PaneFocus::FileList {
                             self.next_file();
