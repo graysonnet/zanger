@@ -39,6 +39,16 @@ Zanger is a fast, read-only terminal file explorer written in Rust. It provides 
 
 ## Installation
 
+### Quick install (Linux / macOS)
+```sh
+curl -fsSL https://raw.githubusercontent.com/graysonnet/zanger/main/scripts/install.sh | bash
+```
+
+### Quick install (Windows PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/graysonnet/zanger/main/scripts/install.ps1 | iex
+```
+
 ### From source
 ```sh
 cargo install --path .
