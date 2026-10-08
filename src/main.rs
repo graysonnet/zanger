@@ -8,7 +8,11 @@ use std::{env, error::Error, io, path::PathBuf, process};
 
 mod app;
 mod explorer;
+mod git;
+mod git_review;
+mod git_ui;
 mod help;
+mod panes;
 mod settings;
 mod syntax;
 mod theme;
@@ -19,7 +23,10 @@ use app::App;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_help() {
-    println!("zanger {} - A fast, read-only TUI file explorer with syntax highlighting", VERSION);
+    println!(
+        "zanger {} - A fast, read-only TUI file explorer with syntax highlighting",
+        VERSION
+    );
     println!();
     println!("USAGE:");
     println!("    zanger [PATH]");
@@ -96,8 +103,14 @@ fn run_app(
     app: &mut App,
 ) -> io::Result<()> {
     loop {
+        if let Some(review) = &mut app.git_review {
+            review.poll();
+        }
         terminal.draw(|f| ui::draw(f, app))?;
 
+        if app.git_review.is_some() && !event::poll(std::time::Duration::from_millis(100))? {
+            continue;
+        }
         let ev = event::read()?;
 
         if let Event::Key(key) = ev

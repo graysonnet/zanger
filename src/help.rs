@@ -10,7 +10,12 @@ pub const SECTIONS: &[KeySection] = &[
         keys: &[
             ("F1", "Show or close this hotkey guide"),
             ("t", "Choose a syntax theme (normal mode)"),
+            ("g", "Review Git changes against a target branch"),
             ("Tab", "Switch between files and preview"),
+            (
+                "Alt+Left / Alt+Right",
+                "Shrink / widen the focused pane by 4 columns",
+            ),
             ("q", "Quit (normal mode)"),
         ],
     },
@@ -18,13 +23,15 @@ pub const SECTIONS: &[KeySection] = &[
         title: "FILE EXPLORER",
         keys: &[
             ("Up / k, Down / j", "Move to the previous or next entry"),
-            ("Enter / Space", "Expand or collapse the selected folder"),
+            ("Enter", "Expand or collapse the selected folder"),
             ("z then a", "Expand or collapse all folders"),
         ],
     },
     KeySection {
         title: "CODE PREVIEW",
         keys: &[
+            ("Ctrl+P", "Toggle full preview of the selected file"),
+            ("Esc (full preview)", "Return to the previous layout"),
             ("Up / k, Down / j", "Scroll one line"),
             ("PageUp / PageDown", "Scroll ten lines"),
             ("Left / h, Right / l", "Pan horizontally by four columns"),
@@ -34,14 +41,46 @@ pub const SECTIONS: &[KeySection] = &[
     KeySection {
         title: "SEARCH",
         keys: &[
-            ("/", "Search filenames (normal mode)"),
-            ("?", "Search inside files (normal mode)"),
+            (
+                "Space then Space",
+                "Open filename search popup (normal mode)",
+            ),
+            ("/", "Find text in the current file preview"),
+            ("?", "Search content across workspace files"),
             (
                 "Type / Backspace",
                 "Edit the query; results update as you type",
             ),
-            ("Enter / Esc", "Exit search, keeping the filters"),
-            ("Esc (normal)", "Clear both search filters"),
+            (
+                "Up / Down",
+                "Select a result or jump between matching lines",
+            ),
+            ("Enter / Esc", "Close search, keeping query and selection"),
+            (
+                "Esc (normal)",
+                "Clear preview search, then workspace filters",
+            ),
+        ],
+    },
+    KeySection {
+        title: "GIT REVIEW",
+        keys: &[
+            ("Type / Backspace", "Filter branches in the target picker"),
+            ("Up / Down, Enter", "Select a target branch or working tree"),
+            ("b", "Choose another target and reload branches"),
+            ("w / r", "Show local changes / refresh comparison"),
+            ("Tab / Enter", "Switch pane / focus the diff"),
+            (
+                "Alt+Left / Alt+Right",
+                "Shrink / widen the focused pane by 4 columns",
+            ),
+            ("Up / k, Down / j", "Select a file or scroll the diff"),
+            ("PageUp / PageDown", "Scroll the diff ten lines"),
+            ("Home / End", "Jump to the start or end of the diff"),
+            ("Left / h, Right / l", "Pan the diff horizontally"),
+            ("n / N", "Next / previous diff hunk (wraps)"),
+            ("Ctrl+P", "Toggle full diff preview"),
+            ("Esc / g", "Return to explorer; Esc closes popup first"),
         ],
     },
     KeySection {

@@ -10,4 +10,5 @@ pub const ACCENT: Color = Color::Rgb(117, 207, 240);
 pub const SELECTION: Color = Color::Rgb(35, 57, 75);
 pub const GREEN: Color = Color::Rgb(166, 218, 149);
 pub const AMBER: Color = Color::Rgb(238, 199, 123);
+pub const RED: Color = Color::Rgb(237, 135, 150);
 pub const MATCH_BACKGROUND: Color = Color::Rgb(100, 76, 34);

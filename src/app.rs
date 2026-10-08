@@ -1,9 +1,11 @@
 use crate::explorer::FileExplorer;
 use crate::{
+    git_review::GitReview,
+    panes::{PaneSplit, resize_direction},
     settings,
     syntax::{SYNTAX_THEMES, SyntaxHighlighter},
 };
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::path::PathBuf;
 
@@ -12,6 +14,7 @@ pub enum AppMode {
     Normal,
     FileSearch,
     ContentSearch,
+    PreviewSearch,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -26,18 +29,25 @@ pub struct App {
     pub focus: PaneFocus,
     pub file_search_query: String,
     pub content_search_query: String,
+    pub preview_search_query: String,
+    pub full_preview: bool,
+    pub pane_split: PaneSplit,
+    focus_before_full_preview: PaneFocus,
     pub explorer: FileExplorer,
     pub highlighter: SyntaxHighlighter,
     pub selected_index: usize,
     pub content_scroll: usize,
     pub content_horizontal_scroll: u16,
     pub file_list_state: ListState,
+    pub search_list_state: ListState,
     pub last_key_z: bool,
+    last_key_space: bool,
     // The original theme while previewing, restored when the picker is cancelled.
     pub theme_picker: Option<usize>,
     pub help_open: bool,
     pub help_scroll: u16,
     pub notice: Option<String>,
+    pub git_review: Option<GitReview>,
     theme_path: Option<PathBuf>,
 }
 
@@ -57,17 +67,24 @@ impl App {
             focus: PaneFocus::FileList,
             file_search_query: String::new(),
             content_search_query: String::new(),
+            preview_search_query: String::new(),
+            full_preview: false,
+            pane_split: PaneSplit::default(),
+            focus_before_full_preview: PaneFocus::FileList,
             explorer,
             highlighter: SyntaxHighlighter::new(),
             selected_index: 0,
             content_scroll: 0,
             content_horizontal_scroll: 0,
             file_list_state: ListState::default(),
+            search_list_state: ListState::default(),
             last_key_z: false,
+            last_key_space: false,
             theme_picker: None,
             help_open: false,
             help_scroll: 0,
             notice: None,
+            git_review: None,
             theme_path,
         };
         if let Some(index) = app.theme_path.as_deref().and_then(settings::load_theme) {
@@ -78,6 +95,11 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        // Space is a two-key sequence, like z then a; any intervening key cancels it.
+        let last_key_space = std::mem::take(&mut self.last_key_space);
+        if last_key_space {
+            self.notice = None;
+        }
         if key.code == KeyCode::F(1) {
             self.help_open = !self.help_open;
             self.help_scroll = 0;
@@ -140,13 +162,51 @@ impl App {
             return;
         }
         self.notice = None;
+        if let Some(review) = &mut self.git_review {
+            if key.code == KeyCode::Char('q') && !review.picker_open {
+                self.should_quit = true;
+            } else if review.handle_key(key) {
+                self.git_review = None;
+            }
+            return;
+        }
+        if let Some(grow) = resize_direction(key) {
+            self.last_key_z = false;
+            if !self.full_preview && matches!(self.mode, AppMode::Normal | AppMode::PreviewSearch) {
+                self.pane_split
+                    .resize(grow, self.focus == PaneFocus::Content);
+            }
+            return;
+        }
+        if matches!(key.code, KeyCode::Char('p' | 'P')) && key.modifiers == KeyModifiers::CONTROL {
+            self.last_key_z = false;
+            if self.full_preview {
+                self.close_full_preview();
+                self.mode = AppMode::Normal;
+            } else if self.has_selected_file() {
+                self.focus_before_full_preview = self.focus;
+                self.full_preview = true;
+                self.focus = PaneFocus::Content;
+                self.mode = AppMode::Normal;
+            } else {
+                self.notice = Some("Select a file for full preview".into());
+            }
+            return;
+        }
         match self.mode {
             AppMode::Normal => {
                 match key.code {
+                    KeyCode::Char('g') => {
+                        self.git_review = Some(GitReview::new(self.explorer.root.clone()))
+                    }
                     KeyCode::Char('q') => self.should_quit = true,
                     KeyCode::Char('t') => {
                         self.theme_picker = Some(self.highlighter.theme_index());
                         self.notice = None;
+                    }
+                    KeyCode::Esc if self.full_preview => self.close_full_preview(),
+                    KeyCode::Esc if !self.preview_search_query.is_empty() => {
+                        self.preview_search_query.clear();
                     }
                     KeyCode::Esc => {
                         self.file_search_query.clear();
@@ -164,21 +224,37 @@ impl App {
                         }
                     }
                     KeyCode::Char('/') => {
-                        self.mode = AppMode::FileSearch;
-                        self.focus = PaneFocus::FileList;
+                        if self.has_selected_file() {
+                            self.mode = AppMode::PreviewSearch;
+                            self.focus = PaneFocus::Content;
+                        } else {
+                            self.notice = Some("Select a file to search its preview".into());
+                        }
                     }
                     KeyCode::Char('?') => {
-                        self.mode = AppMode::ContentSearch;
-                        self.focus = PaneFocus::FileList;
+                        self.open_search(AppMode::ContentSearch);
+                    }
+                    KeyCode::Char(' ') if key.modifiers.is_empty() => {
+                        if last_key_space {
+                            self.open_search(AppMode::FileSearch);
+                        } else {
+                            self.last_key_space = true;
+                            self.notice = Some("Press Space again to search filenames".into());
+                        }
                     }
                     KeyCode::Tab => {
-                        self.focus = if self.focus == PaneFocus::FileList {
-                            PaneFocus::Content
+                        if self.full_preview {
+                            self.close_full_preview();
+                            self.focus = PaneFocus::FileList;
                         } else {
-                            PaneFocus::FileList
-                        };
+                            self.focus = if self.focus == PaneFocus::FileList {
+                                PaneFocus::Content
+                            } else {
+                                PaneFocus::FileList
+                            };
+                        }
                     }
-                    KeyCode::Enter | KeyCode::Char(' ') => {
+                    KeyCode::Enter => {
                         if self.focus == PaneFocus::FileList
                             && let Some(item) = self
                                 .explorer
@@ -191,30 +267,8 @@ impl App {
                             self.update_search();
                         }
                     }
-                    KeyCode::Char('N') => {
-                        let matches = self
-                            .highlighter
-                            .find_match_lines(&self.content_search_query);
-                        if let Some(&last_smaller) =
-                            matches.iter().rev().find(|&&i| i < self.content_scroll)
-                        {
-                            self.content_scroll = last_smaller;
-                        } else if let Some(&last) = matches.last() {
-                            self.content_scroll = last;
-                        }
-                    }
-                    KeyCode::Char('n') => {
-                        let matches = self
-                            .highlighter
-                            .find_match_lines(&self.content_search_query);
-                        if let Some(&first_greater) =
-                            matches.iter().find(|&&i| i > self.content_scroll)
-                        {
-                            self.content_scroll = first_greater;
-                        } else if let Some(&first) = matches.first() {
-                            self.content_scroll = first;
-                        }
-                    }
+                    KeyCode::Char('N') => self.jump_to_match(true),
+                    KeyCode::Char('n') => self.jump_to_match(false),
                     KeyCode::Down | KeyCode::Char('j') => {
                         if self.focus == PaneFocus::FileList {
                             self.next_file();
@@ -251,30 +305,107 @@ impl App {
                 }
                 self.last_key_z = false;
             }
-            AppMode::FileSearch => match key.code {
+            AppMode::FileSearch | AppMode::ContentSearch => match key.code {
                 KeyCode::Esc | KeyCode::Enter => self.mode = AppMode::Normal,
                 KeyCode::Char(c) => {
-                    self.file_search_query.push(c);
+                    self.search_query_mut().push(c);
                     self.update_search();
                 }
                 KeyCode::Backspace => {
-                    self.file_search_query.pop();
+                    self.search_query_mut().pop();
                     self.update_search();
                 }
+                KeyCode::Down => self.next_file(),
+                KeyCode::Up => self.previous_file(),
                 _ => {}
             },
-            AppMode::ContentSearch => match key.code {
+            AppMode::PreviewSearch => match key.code {
                 KeyCode::Esc | KeyCode::Enter => self.mode = AppMode::Normal,
-                KeyCode::Char(c) => {
-                    self.content_search_query.push(c);
-                    self.update_search();
+                KeyCode::Char(c)
+                    if !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    self.preview_search_query.push(c);
+                    self.update_preview_search();
                 }
                 KeyCode::Backspace => {
-                    self.content_search_query.pop();
-                    self.update_search();
+                    self.preview_search_query.pop();
+                    self.update_preview_search();
                 }
+                KeyCode::Down => self.jump_to_match(false),
+                KeyCode::Up => self.jump_to_match(true),
                 _ => {}
             },
+        }
+    }
+
+    fn has_selected_file(&self) -> bool {
+        self.explorer
+            .visible_items
+            .get(self.selected_index)
+            .is_some_and(|item| !item.is_dir)
+    }
+
+    fn close_full_preview(&mut self) {
+        self.full_preview = false;
+        self.focus = self.focus_before_full_preview;
+    }
+
+    pub fn preview_query(&self) -> &str {
+        if self.mode == AppMode::PreviewSearch || !self.preview_search_query.is_empty() {
+            &self.preview_search_query
+        } else {
+            &self.content_search_query
+        }
+    }
+
+    fn update_preview_search(&mut self) {
+        let matches = self
+            .highlighter
+            .find_match_lines(&self.preview_search_query);
+        if let Some(&line) = matches
+            .iter()
+            .find(|&&line| line >= self.content_scroll)
+            .or(matches.first())
+        {
+            self.content_scroll = line;
+            self.content_horizontal_scroll = 0;
+        }
+    }
+
+    fn jump_to_match(&mut self, previous: bool) {
+        let matches = self.highlighter.find_match_lines(self.preview_query());
+        let line = if previous {
+            matches
+                .iter()
+                .rev()
+                .find(|&&line| line < self.content_scroll)
+                .or(matches.last())
+        } else {
+            matches
+                .iter()
+                .find(|&&line| line > self.content_scroll)
+                .or(matches.first())
+        };
+        if let Some(&line) = line {
+            self.content_scroll = line;
+        }
+    }
+
+    fn open_search(&mut self, mode: AppMode) {
+        self.mode = mode;
+        if !self.full_preview {
+            self.focus = PaneFocus::FileList;
+        }
+        self.search_list_state = ListState::default();
+    }
+
+    fn search_query_mut(&mut self) -> &mut String {
+        if self.mode == AppMode::FileSearch {
+            &mut self.file_search_query
+        } else {
+            &mut self.content_search_query
         }
     }
 
@@ -302,6 +433,7 @@ impl App {
     }
 
     pub fn load_selected_file(&mut self) {
+        self.preview_search_query.clear();
         self.content_scroll = 0;
         self.content_horizontal_scroll = 0;
         if let Some(item) = self.explorer.visible_items.get(self.selected_index) {

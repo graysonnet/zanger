@@ -2,21 +2,27 @@
 
 Zanger is a fast, read-only terminal file explorer written in Rust. Browse your workspace in a compact sidebar, read syntax-highlighted code, and search across files while respecting `.gitignore`.
 
+See the [v1.4.0 release notes](docs/releases/v1.4.0.md) for Git review, search and preview updates, pane resizing, and shortcut changes.
+
 ## UI Preview
 
 ![Zanger showing a PowerShell script with a file sidebar, line numbers, and a compact status bar](docs/images/preview.png)
 
 A dark slate palette, cyan focus borders, and contextual keyboard hints keep the interface clear. Below 78 terminal columns, only the focused pane is shown; use `Tab` to switch between the explorer and preview.
 
+When both panes are visible, `Alt+Left` shrinks the focused pane and `Alt+Right` widens it by four columns. Use `Tab` to choose which pane to resize. Both panes keep at least 24 columns. The split is remembered while browsing or within a Git review, including after a temporary terminal resize or full preview. Popup dialogs and single-pane layouts do not resize.
+
 ## Features
 
 - **Tree View File Explorer** — Collapsible nested directories with fold/expand support.
-- **Code Preview** — Line numbers, a scrollbar, language details, and horizontal scrolling for long lines.
+- **Code Preview** — Line numbers, a scrollbar, language details, and horizontal scrolling for long lines. `Ctrl+P` toggles a full preview of the selected file.
 - **Syntax Highlighting** — Powered by `syntect` and the `two-face` syntax bundle. Includes PowerShell scripts (`.ps1`), modules (`.psm1`), and data files (`.psd1`).
 - **Theme Picker** (`t`) — Eight syntax themes with live preview and a saved preference.
 - **Hotkey Guide** (`F1`) — A scrollable keyboard reference, available from any screen.
-- **File Name Search** (`/`) — Instantly filter the file tree by path.
-- **Content Search** (`?`) — Fast ripgrep-like deep content search powered by `rayon` parallel processing and `bstr` byte matching.
+- **Git Review** (`g`) — Choose a merge target branch and review changed files with colored unified diffs, or inspect local working-tree changes.
+- **File Name Search** (`Space` then `Space`) — Open a centered popup with live results filtered by path.
+- **Find in File** (`/`) — Search the current preview with live highlights and matching-line navigation, preserving workspace filters and file selection.
+- **Content Search** (`?`) — Search inside files from a popup, powered by `rayon` parallel processing and `bstr` byte matching.
 - **Search Result Highlighting** — Amber highlights mark matching text and line numbers. Active filters stay visible in the status bar.
 - **Match Navigation** — Use `n`/`N` to jump between content search matches within a file.
 - **Cross-Platform** — Runs natively on Linux, macOS, and Windows (x86_64 and ARM64).
@@ -47,6 +53,32 @@ zanger /path/to/dir # Explore a specific directory
 zanger --help       # Show help
 zanger --version    # Show version
 ```
+
+## Git review
+
+Press `g` in normal mode to review Git changes. The branch picker includes local branches, remote-tracking branches already available in your repository, and **Working tree**. Type to filter, use `Up` / `Down` to select, and press `Enter` to compare. Git must be installed and available on PATH. Opening a subdirectory discovers its containing repository and reviews the whole repository.
+
+For a branch target, the current branch (or detached HEAD) is the source. Zanger compares the common ancestor of the target and HEAD to HEAD, equivalent to `git diff target...HEAD`. This shows the committed changes proposed for merging into the selected branch. The header shows the direction and counts local changes excluded from the branch comparison. This view does not simulate the final merge or predict conflicts. Unrelated histories and histories with multiple merge bases display an explanation.
+
+Choose **Working tree**, or press `w` in the review, to see combined staged and unstaged changes against HEAD plus untracked files. Changes that cancel each other between the index and working tree have no combined diff. Added, modified, deleted, renamed, untracked, and currently unmerged files have status labels; binary files show Git's binary-change notice. Renames show both paths. Each text diff includes old/new line numbers and addition/deletion counts. Empty files and changes without text hunks show metadata or an empty-diff message.
+
+| Key in Git review | Action |
+|-------------------|--------|
+| `b` | Reload branches and choose another comparison |
+| `w` | Review local working-tree changes |
+| `r` | Refresh the selected comparison |
+| `Up` / `Down`, `k` / `j` | Select a changed file or scroll the focused diff |
+| `Tab` / `Enter` | Switch pane / focus the diff |
+| `Alt+Left` / `Alt+Right` | Shrink / widen the focused pane by 4 columns |
+| `PageUp` / `PageDown`, `Home` / `End` | Scroll or jump through the diff |
+| `Left` / `Right`, `h` / `l` | Pan horizontally |
+| `n` / `N` | Jump to the next / previous diff hunk |
+| `Ctrl+P` | Toggle full diff preview |
+| `Esc` | Close the picker or full preview first, then return to the explorer |
+| `g` | Return to the explorer |
+| `F1` | Open the hotkey guide |
+
+Git operations run in background workers; loading and errors appear in the review. Committed comparisons use fixed commit IDs until refreshed. Working-tree diffs read current local files; press `r` after external edits. Each displayed diff is limited to 20,000 lines or 2 MiB of text, with a **partial diff** label and partial line counts when truncated. Zanger does not fetch, check out branches, stage, commit, or merge. Returning to the explorer preserves your file selection, search filters, and preview position.
 
 ## Syntax themes
 
@@ -80,28 +112,41 @@ Press `F1` at any time for the in-app hotkey guide, or run `zanger --help`. In t
 |-----|--------|
 | `q` | Quit |
 | `F1` | Show or close the hotkey guide |
+| `g` | Open Git review and choose a merge target |
 | `t` | Open the syntax theme picker (normal mode) |
 | `Tab` | Switch focus between file list and content pane |
+| `Alt+Left` / `Alt+Right` | Shrink / widen the focused pane by 4 columns |
+| `Ctrl+P` | Toggle full preview of the selected file; also works from search |
+| `Esc` in full preview | Return to the previous layout |
 | `j` / `Down` | Navigate down (file list) or scroll down (content) |
 | `k` / `Up` | Navigate up (file list) or scroll up (content) |
 | `PageDown` | Scroll content down by 10 lines |
 | `PageUp` | Scroll content up by 10 lines |
 | `h` / `Left`, `l` / `Right` | Scroll content horizontally by 4 columns |
-| `Enter` / `Space` | Toggle fold/expand selected directory |
+| `Enter` | Toggle fold/expand selected directory |
 | `za` | Toggle fold/expand all directories |
 
 ### Search
+
+Press `/` to find text inside the selected file. The search pane appears at the bottom of the preview, highlights matches as you type, and shows a matching-line count. `Up` / `Down` moves between matching lines; `Enter` or `Esc` closes the pane while retaining the query. Use `n` / `N` to continue navigating matches. Preview search stays separate from workspace filters and clears when loading another file.
+
+Press `Space` twice consecutively in normal mode to open the filename search popup. Any intervening key cancels the Space sequence. Press `?` to search content across workspace files. Both show live file results and a result count; use `Up` / `Down` to select a file, then `Enter` or `Esc` to return to browsing with the selection and filters retained. `Ctrl+P` opens the selected result in full preview.
+
+Press `Ctrl+P` while browsing to expand the selected file preview. Scrolling, `/` search, themes, and help remain available. `Ctrl+P` again or `Esc` returns to the previous layout without resetting the scroll position; `Tab` returns to the file list. If search or help is open, `Esc` closes that first.
+
 | Key | Action |
 |-----|--------|
-| `/` | Enter file name search mode |
-| `?` | Enter content search mode |
+| `Space` then `Space` | Open filename search popup |
+| `/` | Find text in the current file preview |
+| `?` | Search content across workspace files |
 | Typing / `Backspace` | Edit the current query; results update immediately |
+| `Up` / `Down` in search | Select the previous / next file result or matching line |
 | `n` | Jump to next content match |
 | `N` | Jump to previous content match |
-| `Esc` / `Enter` | Exit search mode and keep the filters |
-| `Esc` in normal mode | Clear both search filters |
+| `Esc` / `Enter` | Close search and keep the query and selection |
+| `Esc` in normal mode | Clear preview search first, then workspace filters on the next press |
 
-Navigation shortcuts apply in normal mode. While editing a search, letters such as `t`, `j`, and `q` are entered as text. `?` searches file contents; `F1` opens help.
+Navigation shortcuts apply in normal mode. While editing a search, spaces and letters such as `t`, `j`, and `q` are entered as text. `F1` opens help and returns to the same search when closed. Use `Enter` to expand or collapse a folder; Space is reserved for the search shortcut.
 
 ## Architecture
 
