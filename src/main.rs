@@ -8,7 +8,10 @@ use std::{env, error::Error, io, path::PathBuf, process};
 
 mod app;
 mod explorer;
+mod help;
+mod settings;
 mod syntax;
+mod theme;
 mod ui;
 
 use app::App;
@@ -28,16 +31,13 @@ fn print_help() {
     println!("    -h, --help       Print this help message");
     println!("    -v, --version    Print version");
     println!();
-    println!("KEYBINDINGS:");
-    println!("    q              Quit");
-    println!("    Tab            Switch focus between file list and content pane");
-    println!("    j/k or Up/Down Navigate files or scroll content");
-    println!("    Enter/Space    Toggle fold/expand directory");
-    println!("    za             Toggle fold/expand all directories");
-    println!("    /              File name search");
-    println!("    ?              Content search (ripgrep-like)");
-    println!("    n/N            Jump to next/previous content match");
-    println!("    PageUp/Down    Scroll content by 10 lines");
+    for section in help::SECTIONS {
+        println!("{}:", section.title);
+        for (key, action) in section.keys {
+            println!("    {key:<22} {action}");
+        }
+        println!();
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -100,10 +100,10 @@ fn run_app(
 
         let ev = event::read()?;
 
-        if let Event::Key(key) = ev {
-            if key.kind == KeyEventKind::Press {
-                app.handle_key(key);
-            }
+        if let Event::Key(key) = ev
+            && key.kind == KeyEventKind::Press
+        {
+            app.handle_key(key);
         }
 
         if app.should_quit {

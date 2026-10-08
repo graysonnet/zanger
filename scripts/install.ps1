@@ -3,6 +3,29 @@ $ErrorActionPreference = "Stop"
 $Repo = "graysonnet/zanger"
 $InstallDir = "$env:LOCALAPPDATA\zanger"
 
+function Add-PathEntry {
+    param(
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$PathValue,
+        [Parameter(Mandatory = $true)]
+        [string]$Directory
+    )
+
+    $NormalizedDirectory = $Directory.TrimEnd('\', '/')
+    foreach ($Entry in ($PathValue -split ';')) {
+        $NormalizedEntry = [Environment]::ExpandEnvironmentVariables($Entry.Trim().Trim('"')).TrimEnd('\', '/')
+        if ($NormalizedEntry -ieq $NormalizedDirectory) {
+            return $PathValue
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $Directory
+    }
+    return "$($PathValue.TrimEnd(';'));$Directory"
+}
+
 Write-Host "Installing zanger..."
 
 $Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
@@ -37,12 +60,16 @@ Move-Item -Path "$TmpDir\zanger.exe" -Destination "$InstallDir\zanger.exe" -Forc
 
 Remove-Item -Recurse -Force $TmpDir
 
-# Add to PATH if not already there
+# Add to PATH for future terminals without copying the combined process PATH into the user PATH.
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($UserPath -notlike "*$InstallDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
-    Write-Host "Added $InstallDir to your PATH (restart your terminal to apply)"
+$UpdatedUserPath = Add-PathEntry -PathValue $UserPath -Directory $InstallDir
+if ($UpdatedUserPath -cne $UserPath) {
+    [Environment]::SetEnvironmentVariable("Path", $UpdatedUserPath, "User")
+    Write-Host "Added $InstallDir to your user PATH"
 }
 
+# Make the command available immediately when installing with Invoke-Expression.
+$env:Path = Add-PathEntry -PathValue $env:Path -Directory $InstallDir
+
 Write-Host "zanger $Tag installed to $InstallDir\zanger.exe"
-Write-Host "Run 'zanger' to get started!"
+Write-Host "Run 'zanger' now to get started!"

@@ -12,6 +12,7 @@ pub struct FileItem {
 }
 
 pub struct FileExplorer {
+    pub root: PathBuf,
     pub all_items: Vec<FileItem>,
     pub visible_items: Vec<FileItem>,
     pub collapsed_dirs: HashSet<PathBuf>,
@@ -20,6 +21,7 @@ pub struct FileExplorer {
 impl FileExplorer {
     pub fn new() -> Self {
         Self {
+            root: PathBuf::from("."),
             all_items: Vec::new(),
             visible_items: Vec::new(),
             collapsed_dirs: HashSet::new(),
@@ -27,17 +29,17 @@ impl FileExplorer {
     }
 
     pub fn refresh(&mut self, root: &Path) {
+        self.root = root.to_path_buf();
         self.all_items.clear();
+        self.collapsed_dirs.clear();
         let walker = WalkBuilder::new(root).hidden(false).build();
 
         for result in walker.filter_map(Result::ok) {
-            let is_dir = result.file_type().map_or(false, |ft| ft.is_dir());
-            let path = result.into_path();
-
-            // OS-agnostic way to skip the root directory "." itself
-            if path.components().count() <= 1 && is_dir {
+            if result.depth() == 0 {
                 continue;
             }
+            let is_dir = result.file_type().is_some_and(|ft| ft.is_dir());
+            let path = result.into_path();
 
             if is_dir {
                 self.collapsed_dirs.insert(path.clone());
