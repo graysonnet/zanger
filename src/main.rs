@@ -8,6 +8,7 @@ use std::{env, error::Error, io, path::PathBuf, process};
 
 mod app;
 mod explorer;
+mod fuzzy;
 mod git;
 mod git_review;
 mod git_ui;
@@ -20,6 +21,7 @@ mod todo;
 mod todo_explorer;
 mod todo_ui;
 mod ui;
+mod vim;
 
 use app::App;
 
@@ -106,6 +108,7 @@ fn run_app(
     app: &mut App,
 ) -> io::Result<()> {
     loop {
+        app.poll_explorer();
         if let Some(review) = &mut app.git_review {
             review.poll();
         }
@@ -114,7 +117,7 @@ fn run_app(
         }
         terminal.draw(|f| ui::draw(f, app))?;
 
-        if (app.git_review.is_some() || app.todo_explorer.is_some())
+        if (app.git_review.is_some() || app.todo_explorer.is_some() || app.explorer.loading())
             && !event::poll(std::time::Duration::from_millis(100))?
         {
             continue;

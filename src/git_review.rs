@@ -1,5 +1,6 @@
 use crate::git::{Comparison, Diff, DiffKind, Repository, Target};
 use crate::panes::{PaneSplit, resize_direction};
+use crate::vim::{Action, VimKeys};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::{
@@ -15,6 +16,8 @@ enum Loaded {
 }
 
 pub struct GitReview {
+    vim: VimKeys,
+    pub viewport_rows: usize,
     pub repository: Option<Repository>,
     pub comparison: Option<Comparison>,
     pub diff: Option<Diff>,
@@ -37,6 +40,8 @@ pub struct GitReview {
 impl GitReview {
     pub fn new(path: PathBuf) -> Self {
         let mut review = Self {
+            vim: VimKeys::default(),
+            viewport_rows: 20,
             repository: None,
             comparison: None,
             diff: None,
@@ -205,8 +210,16 @@ impl GitReview {
     }
 
     // Returns true to restore the explorer exactly as it was before review.
+    pub fn reset_keys(&mut self) {
+        self.vim.reset();
+    }
+    pub fn keys_pending(&self) -> bool {
+        self.vim.pending()
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         if self.picker_open {
+            self.vim.reset();
             let count = self.choices().len();
             match key.code {
                 KeyCode::Esc => {
@@ -248,14 +261,67 @@ impl GitReview {
             return false;
         }
         if let Some(grow) = resize_direction(key) {
+            self.vim.reset();
             if !self.full_preview {
                 self.pane_split.resize(grow, self.preview_focus);
             }
             return false;
         }
         if matches!(key.code, KeyCode::Char('p' | 'P')) && key.modifiers == KeyModifiers::CONTROL {
+            self.vim.reset();
             self.full_preview = !self.full_preview;
             self.preview_focus = self.full_preview;
+            return false;
+        }
+        if let Some(action) = self.vim.handle(key) {
+            let count = self
+                .comparison
+                .as_ref()
+                .map_or(0, |comparison| comparison.changes.len());
+            match action {
+                Action::Git => return true,
+                Action::PaneLeft | Action::PaneRight | Action::PaneNext => {
+                    self.full_preview = false;
+                    self.preview_focus = match action {
+                        Action::PaneLeft => false,
+                        Action::PaneRight => true,
+                        _ => !self.preview_focus,
+                    };
+                }
+                Action::Top | Action::Bottom | Action::Page { .. } => {
+                    let position = if self.preview_focus {
+                        self.scroll
+                    } else {
+                        self.selected
+                    };
+                    let next = match action {
+                        Action::Top => 0,
+                        Action::Bottom => usize::MAX,
+                        Action::Page { down, half } => {
+                            let amount = (self.viewport_rows / if half { 2 } else { 1 }).max(1);
+                            if down {
+                                position.saturating_add(amount)
+                            } else {
+                                position.saturating_sub(amount)
+                            }
+                        }
+                        _ => position,
+                    };
+                    if self.preview_focus {
+                        self.scroll = next;
+                    } else if self.loading.is_none() {
+                        self.selected = next.min(count.saturating_sub(1));
+                        self.load_diff();
+                    }
+                }
+                _ => {}
+            }
+            return false;
+        }
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
             return false;
         }
         match key.code {
@@ -263,7 +329,7 @@ impl GitReview {
                 self.full_preview = false;
                 self.preview_focus = false;
             }
-            KeyCode::Esc | KeyCode::Char('g') => return true,
+            KeyCode::Esc => return true,
             KeyCode::Char('b') => {
                 self.picker_open = true;
                 self.branch_query.clear();
@@ -380,6 +446,7 @@ mod tests {
         app.preview_search_query = "base".into();
         let selected = app.selected_index;
         press(&mut app, KeyCode::Char('g'));
+        press(&mut app, KeyCode::Char('b'));
         finish(app.git_review.as_mut().unwrap());
         for c in "main".chars() {
             press(&mut app, KeyCode::Char(c));
@@ -492,5 +559,32 @@ mod tests {
         finish(&mut review);
         assert!(review.error.is_some());
         assert!(review.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn vim_paging_and_prefixes_do_not_trigger_git_commands_or_picker_input() {
+        let mut review = GitReview::new(std::env::temp_dir());
+        finish(&mut review);
+        review.picker_open = false;
+        review.preview_focus = true;
+        review.viewport_rows = 18;
+        review.scroll = 40;
+        review.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert_eq!(review.scroll, 22);
+        assert!(!review.picker_open);
+        review.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert!(!review.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)));
+        assert_eq!(review.scroll, 0);
+        review.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        review.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        assert!(!review.preview_focus);
+        review.picker_open = true;
+        for c in "gggb".chars() {
+            review.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        assert_eq!(review.branch_query, "gggb");
+        review.picker_open = false;
+        review.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert!(review.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)));
     }
 }

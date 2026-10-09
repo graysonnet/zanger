@@ -19,7 +19,9 @@ src/
 ├── todo.rs      # Read-only workspace TODO scanning and result metadata
 ├── todo_explorer.rs # Cancellable scans, filtering, and TODO navigation
 ├── todo_ui.rs   # TODO result list and source preview
-├── explorer.rs  # Filesystem Interaction and Search Filtering
+├── explorer.rs  # Lazy tree loading and background workspace search
+├── fuzzy.rs     # Ranked subsequence path matching
+├── vim.rs       # Normal-mode key sequences shared by browsing views
 └── syntax.rs    # Content parsing and Syntax Highlighting
 ```
 
@@ -37,7 +39,7 @@ Acts as the central "Brain".
 - Opens filename search with two consecutive Space presses, and workspace content search with `?`. Search modes edit their queries and use Up/Down for result selection; Enter/Escape close the popup while retaining filters. Space sequences reset on intervening keys and never consume spaces in a query.
 - Uses `/` for a separate preview query against cached file content, without filtering the explorer or reloading the selected file. Preview matches take precedence over workspace content highlights and clear when a file is loaded.
 - Uses Ctrl+P to toggle full preview, preserving scroll and the previous pane focus. Help and theme overlays consume keys first; Escape closes search before returning from full preview, and clears preview search before workspace filters in the normal layout.
-- Owns an optional `GitReview` entered with `g`. The review has independent navigation state; leaving it restores the explorer without reloading files or clearing queries.
+- Owns an optional `GitReview` entered with `gb`. The review has independent navigation state; leaving it restores the explorer without reloading files or clearing queries.
 - Owns an optional `TodoExplorer` entered with `T`. It keeps separate result, preview, input, and pane state so leaving it preserves the original file explorer. Help takes precedence over TODO key handling.
 
 ### `todo.rs`, `todo_explorer.rs`, and `todo_ui.rs`
@@ -74,8 +76,10 @@ Defines the hotkey sections shared by the `F1` guide and `--help` output.
 
 ### `explorer.rs`
 Uses the `ignore` crate to build up a list of files that do not violate active `.gitignore` rules in the current working directory.
-- `refresh()` remembers the workspace root, traverses its descendants, and updates `all_items`.
-- `update_visible()` calculates the specific folders to skip rendering based on the `collapsed_dirs` HashSet. 
+- `refresh()` loads at most three levels from the workspace root, expanding the first two and leaving third-level directories collapsed. Opening a directory whose children have not been loaded reads three levels below that directory; loaded branches are reused. `all_items` contains only loaded tree entries.
+- A separate full-workspace index starts on the first search or explicit `zR` expand-all request. A cancellable background worker publishes path batches over a bounded channel. Indexing never expands the browsing tree. Filename search includes folders and uses ranked, Unicode-aware subsequences; a trailing slash restricts results to folders. Content search combines a fuzzy path filter with a literal case-insensitive text query in a background worker. Replacing the query cancels the previous request.
+- `main.rs` polls explorer jobs while active, preserves selection by path across batches, and shows progress. `r` rebuilds the tree and invalidates the index. Directory search results reveal their ancestor chain before expanding the selected folder. Search and tree traversal respect ignore rules and exclude `.git` metadata.
+- `update_visible()` chooses flat search results or the loaded tree with collapsed ancestors omitted.
 
 ### `syntax.rs`
 The adapter for `syntect` rendering. 
@@ -85,6 +89,9 @@ The adapter for `syntect` rendering.
 - Preserves theme foreground/background colors and bold, italic, and underline styles in rendered spans.
 - Walks string buffers turning raw tokens into `ratatui::text::Span` elements formatted with `ratatui::style::Color` R/G/B data for the UI parser to use natively.
 
+### `vim.rs`
+Parses `gg`, `gb`, `za`/`zo`/`zc`, `zR`/`zM`, Ctrl+U/D/B/F, and Ctrl+W pane sequences only in navigation modes. App, Git review, and Todo Explorer own independent parser state. Popups, text inputs, and layout shortcuts clear pending sequences. Modified letters do not fall through to plain commands. Git moved from `g` to `gb`; `za` toggles the selected folder and `zR`/`zM` act on all folders.
+
 ## Concurrency Note
-Currently, the recursive file building in `FileExplorer::refresh` happens synchronously before `App::new()` yields back to `main`. If used in a massively heavy project (e.g., millions of git tracked files), this initial load block can freeze the startup briefly.
-For future scaling, moving `ignore::WalkBuilder` discovery into an async thread pushing `Result` items down a `crossbeam_channel` would keep the UI responsive from frame 1.
+The initial tree and newly opened branches use depth-limited synchronous reads. Very wide directories can still delay an expansion, but ordinary browsing no longer walks the entire workspace.
+Full-workspace path discovery and content filtering run in background workers only when requested. Todo and Git views keep their existing independent workers.

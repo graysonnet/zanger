@@ -2,6 +2,7 @@ use crate::{
     panes::{PaneSplit, resize_direction},
     syntax::SyntaxHighlighter,
     todo::{self, Scan, Todo},
+    vim::{Action, VimKeys},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
@@ -40,6 +41,8 @@ impl Drop for PendingScan {
 }
 
 pub struct TodoExplorer {
+    vim: VimKeys,
+    pub viewport_rows: usize,
     pub root: PathBuf,
     pub scan: Scan,
     pub visible: Vec<usize>,
@@ -63,6 +66,8 @@ pub struct TodoExplorer {
 impl TodoExplorer {
     pub fn new(root: PathBuf, theme_index: usize) -> Self {
         let mut explorer = Self {
+            vim: VimKeys::default(),
+            viewport_rows: 20,
             root,
             scan: Scan::default(),
             visible: Vec::new(),
@@ -260,6 +265,13 @@ impl TodoExplorer {
     }
 
     /// Return true to restore the original file explorer.
+    pub fn reset_keys(&mut self) {
+        self.vim.reset();
+    }
+    pub fn keys_pending(&self) -> bool {
+        self.vim.pending()
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         if self.pending.as_ref().is_some_and(|pending| pending.started)
             && (self.current().is_some() || self.input.is_some())
@@ -267,12 +279,14 @@ impl TodoExplorer {
             self.remember_scan_selection();
         }
         if let Some(grow) = resize_direction(key) {
+            self.vim.reset();
             if !self.full_preview && self.input != Some(Input::Filter) {
                 self.pane_split.resize(grow, self.preview_focus);
             }
             return false;
         }
         if matches!(key.code, KeyCode::Char('p' | 'P')) && key.modifiers == KeyModifiers::CONTROL {
+            self.vim.reset();
             if self.full_preview {
                 self.close_full_preview();
             } else if self.current().is_some() {
@@ -284,6 +298,7 @@ impl TodoExplorer {
             return false;
         }
         if let Some(input) = self.input {
+            self.vim.reset();
             match key.code {
                 KeyCode::Enter | KeyCode::Esc => self.input = None,
                 KeyCode::Up if input == Input::Filter => {
@@ -328,6 +343,51 @@ impl TodoExplorer {
                     }
                 }
             }
+            return false;
+        }
+        if let Some(action) = self.vim.handle(key) {
+            match action {
+                Action::PaneLeft | Action::PaneRight | Action::PaneNext => {
+                    self.full_preview = false;
+                    self.preview_focus = match action {
+                        Action::PaneLeft => false,
+                        Action::PaneRight => true,
+                        _ => !self.preview_focus,
+                    };
+                }
+                Action::Top | Action::Bottom | Action::Page { .. } => {
+                    let position = if self.preview_focus {
+                        self.scroll
+                    } else {
+                        self.selected
+                    };
+                    let next = match action {
+                        Action::Top => 0,
+                        Action::Bottom => usize::MAX,
+                        Action::Page { down, half } => {
+                            let amount = (self.viewport_rows / if half { 2 } else { 1 }).max(1);
+                            if down {
+                                position.saturating_add(amount)
+                            } else {
+                                position.saturating_sub(amount)
+                            }
+                        }
+                        _ => position,
+                    };
+                    if self.preview_focus {
+                        self.scroll = next;
+                    } else {
+                        self.select(next);
+                    }
+                }
+                _ => {}
+            }
+            return false;
+        }
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
             return false;
         }
         match key.code {
@@ -520,6 +580,7 @@ mod tests {
         app.content_search_query = "heading".into();
         app.explorer
             .update_visible(&app.file_search_query, &app.content_search_query);
+        crate::explorer::tests::finish_app(&mut app);
         app.load_selected_file();
         app.highlighter.set_theme(2);
         app.focus = PaneFocus::Content;
@@ -781,5 +842,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn vim_paging_preserves_filter_and_prefixes_do_not_quit() {
+        let workspace = Workspace::new();
+        workspace.write("code.rs", "// TODO: first\n// TODO: second\n");
+        let mut app = App::with_theme_path(workspace.0.clone(), None);
+        press(&mut app, KeyCode::Char('T'));
+        finish(app.todo_explorer.as_mut().unwrap());
+        let todos = app.todo_explorer.as_mut().unwrap();
+        todos.viewport_rows = 12;
+        todos.preview_focus = true;
+        todos.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        assert_eq!(todos.scroll, 12);
+        assert!(todos.input.is_none());
+        todos.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        todos.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(todos.scroll, 0);
+        press(&mut app, KeyCode::Char('g'));
+        press(&mut app, KeyCode::Char('q'));
+        assert!(!app.should_quit);
+        press(&mut app, KeyCode::Char('f'));
+        type_text(&mut app, "ggGhjkl");
+        assert_eq!(app.todo_explorer.as_ref().unwrap().filter, "ggGhjkl");
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        assert_eq!(app.todo_explorer.as_ref().unwrap().filter, "ggGhjkl");
     }
 }

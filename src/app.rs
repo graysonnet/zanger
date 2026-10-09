@@ -5,6 +5,7 @@ use crate::{
     settings,
     syntax::{SYNTAX_THEMES, SyntaxHighlighter},
     todo_explorer::TodoExplorer,
+    vim::{Action, VimKeys},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
@@ -41,7 +42,8 @@ pub struct App {
     pub content_horizontal_scroll: u16,
     pub file_list_state: ListState,
     pub search_list_state: ListState,
-    pub last_key_z: bool,
+    vim: VimKeys,
+    pub viewport_rows: usize,
     last_key_space: bool,
     // The original theme while previewing, restored when the picker is cancelled.
     pub theme_picker: Option<usize>,
@@ -80,7 +82,8 @@ impl App {
             content_horizontal_scroll: 0,
             file_list_state: ListState::default(),
             search_list_state: ListState::default(),
-            last_key_z: false,
+            vim: VimKeys::default(),
+            viewport_rows: 20,
             last_key_space: false,
             theme_picker: None,
             help_open: false,
@@ -106,7 +109,13 @@ impl App {
         if key.code == KeyCode::F(1) {
             self.help_open = !self.help_open;
             self.help_scroll = 0;
-            self.last_key_z = false;
+            self.vim.reset();
+            if let Some(review) = &mut self.git_review {
+                review.reset_keys();
+            }
+            if let Some(todos) = &mut self.todo_explorer {
+                todos.reset_keys();
+            }
             return;
         }
         if self.help_open {
@@ -166,7 +175,11 @@ impl App {
         }
         self.notice = None;
         if let Some(todos) = &mut self.todo_explorer {
-            if key.code == KeyCode::Char('q') && todos.input.is_none() {
+            if key.code == KeyCode::Char('q')
+                && key.modifiers.is_empty()
+                && todos.input.is_none()
+                && !todos.keys_pending()
+            {
                 self.should_quit = true;
             } else if todos.handle_key(key) {
                 self.todo_explorer = None;
@@ -174,7 +187,11 @@ impl App {
             return;
         }
         if let Some(review) = &mut self.git_review {
-            if key.code == KeyCode::Char('q') && !review.picker_open {
+            if key.code == KeyCode::Char('q')
+                && key.modifiers.is_empty()
+                && !review.picker_open
+                && !review.keys_pending()
+            {
                 self.should_quit = true;
             } else if review.handle_key(key) {
                 self.git_review = None;
@@ -182,7 +199,7 @@ impl App {
             return;
         }
         if let Some(grow) = resize_direction(key) {
-            self.last_key_z = false;
+            self.vim.reset();
             if !self.full_preview && matches!(self.mode, AppMode::Normal | AppMode::PreviewSearch) {
                 self.pane_split
                     .resize(grow, self.focus == PaneFocus::Content);
@@ -190,7 +207,12 @@ impl App {
             return;
         }
         if matches!(key.code, KeyCode::Char('p' | 'P')) && key.modifiers == KeyModifiers::CONTROL {
-            self.last_key_z = false;
+            self.vim.reset();
+            if matches!(self.mode, AppMode::FileSearch | AppMode::ContentSearch)
+                && self.has_selected_file()
+            {
+                self.close_search(false);
+            }
             if self.full_preview {
                 self.close_full_preview();
                 self.mode = AppMode::Normal;
@@ -204,127 +226,133 @@ impl App {
             }
             return;
         }
-        match self.mode {
-            AppMode::Normal => {
-                match key.code {
-                    KeyCode::Char('T') => {
-                        self.todo_explorer = Some(TodoExplorer::new(
-                            self.explorer.root.clone(),
-                            self.highlighter.theme_index(),
-                        ));
-                    }
-                    KeyCode::Char('g') => {
-                        self.git_review = Some(GitReview::new(self.explorer.root.clone()))
-                    }
-                    KeyCode::Char('q') => self.should_quit = true,
-                    KeyCode::Char('t') => {
-                        self.theme_picker = Some(self.highlighter.theme_index());
-                        self.notice = None;
-                    }
-                    KeyCode::Esc if self.full_preview => self.close_full_preview(),
-                    KeyCode::Esc if !self.preview_search_query.is_empty() => {
-                        self.preview_search_query.clear();
-                    }
-                    KeyCode::Esc => {
-                        self.file_search_query.clear();
-                        self.content_search_query.clear();
-                        self.update_search();
-                    }
-                    KeyCode::Char('z') => {
-                        self.last_key_z = true;
-                        return;
-                    }
-                    KeyCode::Char('a') if self.last_key_z => {
-                        if self.focus == PaneFocus::FileList {
-                            self.explorer.toggle_all_dirs();
-                            self.update_search();
-                        }
-                    }
-                    KeyCode::Char('/') => {
-                        if self.has_selected_file() {
-                            self.mode = AppMode::PreviewSearch;
-                            self.focus = PaneFocus::Content;
-                        } else {
-                            self.notice = Some("Select a file to search its preview".into());
-                        }
-                    }
-                    KeyCode::Char('?') => {
-                        self.open_search(AppMode::ContentSearch);
-                    }
-                    KeyCode::Char(' ') if key.modifiers.is_empty() => {
-                        if last_key_space {
-                            self.open_search(AppMode::FileSearch);
-                        } else {
-                            self.last_key_space = true;
-                            self.notice = Some("Press Space again to search filenames".into());
-                        }
-                    }
-                    KeyCode::Tab => {
-                        if self.full_preview {
-                            self.close_full_preview();
-                            self.focus = PaneFocus::FileList;
-                        } else {
-                            self.focus = if self.focus == PaneFocus::FileList {
-                                PaneFocus::Content
-                            } else {
-                                PaneFocus::FileList
-                            };
-                        }
-                    }
-                    KeyCode::Enter => {
-                        if self.focus == PaneFocus::FileList
-                            && let Some(item) = self
-                                .explorer
-                                .visible_items
-                                .get(self.selected_index)
-                                .cloned()
-                            && item.is_dir
-                        {
-                            self.explorer.toggle_dir(&item.path);
-                            self.update_search();
-                        }
-                    }
-                    KeyCode::Char('N') => self.jump_to_match(true),
-                    KeyCode::Char('n') => self.jump_to_match(false),
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if self.focus == PaneFocus::FileList {
-                            self.next_file();
-                        } else {
-                            self.content_scroll = self.content_scroll.saturating_add(1);
-                        }
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if self.focus == PaneFocus::FileList {
-                            self.previous_file();
-                        } else {
-                            self.content_scroll = self.content_scroll.saturating_sub(1);
-                        }
-                    }
-                    KeyCode::PageDown => {
-                        if self.focus == PaneFocus::Content {
-                            self.content_scroll = self.content_scroll.saturating_add(10);
-                        }
-                    }
-                    KeyCode::PageUp => {
-                        if self.focus == PaneFocus::Content {
-                            self.content_scroll = self.content_scroll.saturating_sub(10);
-                        }
-                    }
-                    KeyCode::Left | KeyCode::Char('h') if self.focus == PaneFocus::Content => {
-                        self.content_horizontal_scroll =
-                            self.content_horizontal_scroll.saturating_sub(4);
-                    }
-                    KeyCode::Right | KeyCode::Char('l') if self.focus == PaneFocus::Content => {
-                        self.content_horizontal_scroll =
-                            self.content_horizontal_scroll.saturating_add(4);
-                    }
-                    _ => {}
-                }
-                self.last_key_z = false;
+        if self.mode == AppMode::Normal {
+            if let Some(action) = self.vim.handle(key) {
+                self.handle_vim(action);
+                return;
             }
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                return;
+            }
+        } else {
+            self.vim.reset();
+        }
+        match self.mode {
+            AppMode::Normal => match key.code {
+                KeyCode::Char('T') => {
+                    self.todo_explorer = Some(TodoExplorer::new(
+                        self.explorer.root.clone(),
+                        self.highlighter.theme_index(),
+                    ));
+                }
+                KeyCode::Char('r') => self.refresh_explorer(),
+                KeyCode::Char('q') => self.should_quit = true,
+                KeyCode::Char('t') => {
+                    self.theme_picker = Some(self.highlighter.theme_index());
+                    self.notice = None;
+                }
+                KeyCode::Esc if self.full_preview => self.close_full_preview(),
+                KeyCode::Esc if !self.preview_search_query.is_empty() => {
+                    self.preview_search_query.clear();
+                }
+                KeyCode::Esc => {
+                    let path = self.selected_path();
+                    if let Some(path) = &path {
+                        self.explorer.reveal(path);
+                    }
+                    self.file_search_query.clear();
+                    self.content_search_query.clear();
+                    self.explorer.set_search_open(false);
+                    self.explorer.update_visible("", "");
+                    self.restore_selection(path);
+                    self.load_selected_file();
+                }
+                KeyCode::Char('/') => {
+                    if self.has_selected_file() {
+                        self.mode = AppMode::PreviewSearch;
+                        self.focus = PaneFocus::Content;
+                    } else {
+                        self.notice = Some("Select a file to search its preview".into());
+                    }
+                }
+                KeyCode::Char('?') => {
+                    self.open_search(AppMode::ContentSearch);
+                }
+                KeyCode::Char(' ') if key.modifiers.is_empty() => {
+                    if last_key_space {
+                        self.open_search(AppMode::FileSearch);
+                    } else {
+                        self.last_key_space = true;
+                        self.notice =
+                            Some("Press Space again to fuzzy search files and folders".into());
+                    }
+                }
+                KeyCode::Tab => {
+                    if self.full_preview {
+                        self.close_full_preview();
+                        self.focus = PaneFocus::FileList;
+                    } else {
+                        self.focus = if self.focus == PaneFocus::FileList {
+                            PaneFocus::Content
+                        } else {
+                            PaneFocus::FileList
+                        };
+                    }
+                }
+                KeyCode::Enter => {
+                    self.folder_action(Action::Fold, false);
+                }
+                KeyCode::Char('N') => self.jump_to_match(true),
+                KeyCode::Char('n') => self.jump_to_match(false),
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.focus == PaneFocus::FileList {
+                        self.next_file();
+                    } else {
+                        self.content_scroll = self.content_scroll.saturating_add(1);
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.focus == PaneFocus::FileList {
+                        self.previous_file();
+                    } else {
+                        self.content_scroll = self.content_scroll.saturating_sub(1);
+                    }
+                }
+                KeyCode::PageDown => {
+                    self.move_by(true, 10);
+                }
+                KeyCode::PageUp => {
+                    self.move_by(false, 10);
+                }
+                KeyCode::Home => self.handle_vim(Action::Top),
+                KeyCode::End => self.handle_vim(Action::Bottom),
+                KeyCode::Left | KeyCode::Char('h') if self.focus == PaneFocus::FileList => {
+                    self.folder_action(Action::Close, true)
+                }
+                KeyCode::Right | KeyCode::Char('l') if self.focus == PaneFocus::FileList => {
+                    self.folder_action(Action::Open, true)
+                }
+                KeyCode::Left | KeyCode::Char('h') if self.focus == PaneFocus::Content => {
+                    self.content_horizontal_scroll =
+                        self.content_horizontal_scroll.saturating_sub(4);
+                }
+                KeyCode::Right | KeyCode::Char('l') if self.focus == PaneFocus::Content => {
+                    self.content_horizontal_scroll =
+                        self.content_horizontal_scroll.saturating_add(4);
+                }
+                _ => {}
+            },
             AppMode::FileSearch | AppMode::ContentSearch => match key.code {
-                KeyCode::Esc | KeyCode::Enter => self.mode = AppMode::Normal,
-                KeyCode::Char(c) => {
+                KeyCode::Esc => self.close_search(false),
+                KeyCode::Enter => self.close_search(true),
+                KeyCode::Char(c)
+                    if !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
                     self.search_query_mut().push(c);
                     self.update_search();
                 }
@@ -362,6 +390,217 @@ impl App {
             .visible_items
             .get(self.selected_index)
             .is_some_and(|item| !item.is_dir)
+    }
+
+    pub fn poll_explorer(&mut self) {
+        // Auxiliary views preserve the explorer snapshot, including its index.
+        if self.git_review.is_some() || self.todo_explorer.is_some() {
+            return;
+        }
+        let path = self.selected_path();
+        if self.explorer.poll() {
+            self.restore_selection(path);
+        }
+    }
+
+    fn selected_path(&self) -> Option<PathBuf> {
+        self.explorer
+            .visible_items
+            .get(self.selected_index)
+            .map(|item| item.path.clone())
+    }
+
+    fn restore_selection(&mut self, path: Option<PathBuf>) {
+        self.selected_index = path
+            .as_ref()
+            .and_then(|path| {
+                self.explorer
+                    .visible_items
+                    .iter()
+                    .position(|item| &item.path == path)
+            })
+            .unwrap_or(
+                self.selected_index
+                    .min(self.explorer.visible_items.len().saturating_sub(1)),
+            );
+        if self.selected_path() != path {
+            self.load_selected_file();
+        }
+    }
+
+    fn close_search(&mut self, enter: bool) {
+        let item = self
+            .explorer
+            .visible_items
+            .get(self.selected_index)
+            .cloned();
+        let path = self.selected_path();
+        self.mode = AppMode::Normal;
+        self.explorer.set_search_open(false);
+        if enter && item.as_ref().is_some_and(|item| item.is_dir) {
+            self.file_search_query.clear();
+            self.content_search_query.clear();
+            self.focus = PaneFocus::FileList;
+            self.full_preview = false;
+            if let Some(item) = &item {
+                self.explorer.reveal(&item.path);
+                self.explorer.expand_dir(&item.path);
+            }
+        } else if self.file_search_query.is_empty()
+            && self.content_search_query.is_empty()
+            && let Some(path) = &path
+        {
+            self.explorer.reveal(path);
+        }
+        // A nonempty filter remains active after closing the input.
+        if self.file_search_query.is_empty() && self.content_search_query.is_empty() {
+            self.explorer.update_visible("", "");
+            self.restore_selection(path);
+        }
+    }
+
+    fn refresh_explorer(&mut self) {
+        let path = self.selected_path();
+        self.explorer.refresh(&self.explorer.root.clone());
+        self.explorer
+            .update_visible(&self.file_search_query, &self.content_search_query);
+        self.restore_selection(path);
+        self.load_selected_file();
+    }
+
+    fn move_by(&mut self, down: bool, amount: usize) {
+        if self.focus == PaneFocus::Content {
+            self.content_scroll = if down {
+                self.content_scroll.saturating_add(amount)
+            } else {
+                self.content_scroll.saturating_sub(amount)
+            };
+        } else {
+            let next = if down {
+                self.selected_index.saturating_add(amount)
+            } else {
+                self.selected_index.saturating_sub(amount)
+            };
+            let next = next.min(self.explorer.visible_items.len().saturating_sub(1));
+            if next != self.selected_index {
+                self.selected_index = next;
+                self.load_selected_file();
+            }
+        }
+    }
+
+    fn handle_vim(&mut self, action: Action) {
+        match action {
+            Action::Pending => {
+                self.notice = self
+                    .vim
+                    .pending()
+                    .then(|| "gg first · gb Git · za fold · zR/zM all · Ctrl+W h/l pane".into());
+            }
+            Action::Git => self.git_review = Some(GitReview::new(self.explorer.root.clone())),
+            Action::Top => {
+                if self.focus == PaneFocus::Content {
+                    self.content_scroll = 0;
+                } else {
+                    self.move_by(false, usize::MAX);
+                }
+            }
+            Action::Bottom => {
+                if self.focus == PaneFocus::Content {
+                    self.content_scroll = self.highlighter.current_lines.len().saturating_sub(1);
+                } else {
+                    self.move_by(true, usize::MAX);
+                }
+            }
+            Action::Page { down, half } => {
+                self.move_by(down, (self.viewport_rows / if half { 2 } else { 1 }).max(1))
+            }
+            Action::PaneLeft | Action::PaneRight | Action::PaneNext => {
+                self.full_preview = false;
+                self.focus = match action {
+                    Action::PaneLeft => PaneFocus::FileList,
+                    Action::PaneRight => PaneFocus::Content,
+                    _ if self.focus == PaneFocus::FileList => PaneFocus::Content,
+                    _ => PaneFocus::FileList,
+                };
+            }
+            Action::Fold | Action::Open | Action::Close => self.folder_action(action, false),
+            Action::ExpandAll | Action::CollapseAll if self.focus == PaneFocus::FileList => {
+                let path = self.selected_path();
+                self.file_search_query.clear();
+                self.content_search_query.clear();
+                if action == Action::ExpandAll {
+                    self.explorer.expand_all();
+                } else {
+                    self.explorer.collapse_all();
+                }
+                self.explorer.update_visible("", "");
+                self.restore_selection(path);
+            }
+            _ => {}
+        }
+    }
+
+    fn folder_action(&mut self, action: Action, navigate: bool) {
+        if self.focus != PaneFocus::FileList {
+            return;
+        }
+        let Some(item) = self
+            .explorer
+            .visible_items
+            .get(self.selected_index)
+            .cloned()
+        else {
+            return;
+        };
+        let mut target = item.path.clone();
+        if self.explorer.searching() {
+            self.file_search_query.clear();
+            self.content_search_query.clear();
+            self.explorer.set_search_open(false);
+            self.explorer.reveal(&target);
+        }
+        match action {
+            Action::Close if item.is_dir && !self.explorer.collapsed_dirs.contains(&target) => {
+                self.explorer.collapsed_dirs.insert(target.clone());
+            }
+            Action::Close if navigate => {
+                if let Some(parent) = target
+                    .parent()
+                    .filter(|parent| *parent != self.explorer.root)
+                {
+                    target = parent.to_path_buf();
+                }
+            }
+            Action::Open if item.is_dir => {
+                let was_open = !self.explorer.collapsed_dirs.contains(&target);
+                self.explorer.expand_dir(&target);
+                if navigate
+                    && was_open
+                    && let Some(child) = self
+                        .explorer
+                        .all_items
+                        .iter()
+                        .find(|child| child.path.parent() == Some(target.as_path()))
+                {
+                    target = child.path.clone();
+                }
+            }
+            Action::Fold if item.is_dir => self.explorer.toggle_dir(&target),
+            Action::Open if navigate => self.focus = PaneFocus::Content,
+            _ => {}
+        }
+        let previous = self.selected_path();
+        self.explorer.update_visible("", "");
+        self.selected_index = self
+            .explorer
+            .visible_items
+            .iter()
+            .position(|item| item.path == target)
+            .unwrap_or(0);
+        if self.selected_path() != previous {
+            self.load_selected_file();
+        }
     }
 
     fn close_full_preview(&mut self) {
@@ -411,11 +650,17 @@ impl App {
     }
 
     fn open_search(&mut self, mode: AppMode) {
+        self.vim.reset();
         self.mode = mode;
         if !self.full_preview {
             self.focus = PaneFocus::FileList;
         }
         self.search_list_state = ListState::default();
+        let path = self.selected_path();
+        self.explorer.set_search_open(true);
+        self.explorer
+            .update_visible(&self.file_search_query, &self.content_search_query);
+        self.restore_selection(path);
     }
 
     fn search_query_mut(&mut self) -> &mut String {

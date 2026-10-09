@@ -29,6 +29,7 @@ pub fn draw(frame: &mut Frame, review: &mut GitReview, show_cursor: bool) {
         Constraint::Length(1),
     ])
     .areas(area);
+    review.viewport_rows = usize::from(body.height.saturating_sub(2)).max(1);
     let title = review
         .comparison
         .as_ref()

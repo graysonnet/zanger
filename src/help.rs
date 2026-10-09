@@ -10,7 +10,7 @@ pub const SECTIONS: &[KeySection] = &[
         keys: &[
             ("F1", "Show or close this hotkey guide"),
             ("t", "Choose a syntax theme (normal mode)"),
-            ("g", "Review Git changes against a target branch"),
+            ("g then b", "Review Git changes against a target branch"),
             ("T (Shift+T)", "Open Todo Explorer for workspace TODOs"),
             ("Tab", "Switch between files and preview"),
             (
@@ -25,7 +25,23 @@ pub const SECTIONS: &[KeySection] = &[
         keys: &[
             ("Up / k, Down / j", "Move to the previous or next entry"),
             ("Enter", "Expand or collapse the selected folder"),
-            ("z then a", "Expand or collapse all folders"),
+            ("h / Left", "Collapse folder, or select its parent"),
+            ("l / Right", "Expand folder, enter child, or focus file"),
+            ("za / zo / zc", "Toggle / open / close selected folder"),
+            ("zR / zM", "Load and expand all / collapse all folders"),
+            ("r", "Refresh tree and workspace search index"),
+        ],
+    },
+    KeySection {
+        title: "VIM NAVIGATION (NORMAL MODE)",
+        keys: &[
+            ("gg / G", "First / last item or preview line"),
+            ("Ctrl+U / Ctrl+D", "Move up / down half the visible pane"),
+            ("Ctrl+B / Ctrl+F", "Move up / down a full visible pane"),
+            ("Ctrl+W then h / l", "Focus left / right pane"),
+            ("Ctrl+W then w", "Switch pane"),
+            ("gb", "Open / leave Git review (g is a prefix)"),
+            ("Esc", "Cancel an unfinished key sequence"),
         ],
     },
     KeySection {
@@ -42,10 +58,7 @@ pub const SECTIONS: &[KeySection] = &[
     KeySection {
         title: "SEARCH",
         keys: &[
-            (
-                "Space then Space",
-                "Open filename search popup (normal mode)",
-            ),
+            ("Space then Space", "Fuzzy search all files and folders"),
             ("/", "Find text in the current file preview"),
             ("?", "Search content across workspace files"),
             (
@@ -57,6 +70,8 @@ pub const SECTIONS: &[KeySection] = &[
                 "Select a result or jump between matching lines",
             ),
             ("Enter / Esc", "Close search, keeping query and selection"),
+            ("Query ending in /", "Show only matching folders"),
+            ("Enter on folder", "Reveal and expand folder in the tree"),
             (
                 "Esc (normal)",
                 "Clear preview search, then workspace filters",
@@ -81,7 +96,7 @@ pub const SECTIONS: &[KeySection] = &[
             ("Left / h, Right / l", "Pan the diff horizontally"),
             ("n / N", "Next / previous diff hunk (wraps)"),
             ("Ctrl+P", "Toggle full diff preview"),
-            ("Esc / g", "Return to explorer; Esc closes popup first"),
+            ("Esc / gb", "Return to explorer; Esc closes popup first"),
         ],
     },
     KeySection {

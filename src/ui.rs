@@ -52,6 +52,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         body.width.saturating_sub(2),
         body.height,
     );
+    app.viewport_rows = usize::from(body.height.saturating_sub(
+        if app.focus == PaneFocus::Content {
+            5
+        } else {
+            2
+        },
+    ))
+    .max(1);
 
     if app.full_preview {
         app.pane_split.hide();
@@ -152,12 +160,12 @@ pub(crate) fn panel(title: String, focused: bool) -> Block<'static> {
 }
 
 fn draw_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let searching = !app.file_search_query.is_empty() || !app.content_search_query.is_empty();
+    let searching = app.explorer.searching();
     let count = app.explorer.visible_items.len();
     let title = if searching { "RESULTS" } else { "EXPLORER" };
     let block = panel(title.into(), app.focus == PaneFocus::FileList).title_bottom(
         Line::from(Span::styled(
-            format!(" {count} {} ", if searching { "files" } else { "entries" }),
+            format!(" {count} entries "),
             Style::default().fg(theme::MUTED),
         ))
         .right_aligned(),
@@ -187,8 +195,7 @@ fn draw_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_entries(frame: &mut Frame, app: &mut App, area: Rect, search_popup: bool) {
-    let flat_paths =
-        search_popup || !app.file_search_query.is_empty() || !app.content_search_query.is_empty();
+    let flat_paths = search_popup || app.explorer.searching();
     let items: Vec<ListItem> = app
         .explorer
         .visible_items
@@ -541,6 +548,16 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
                 notice.as_str(),
                 Style::default().fg(theme::AMBER),
             ));
+        } else if app.explorer.loading() {
+            spans.push(Span::styled(
+                format!(
+                    "Searching workspace · {} paths indexed",
+                    app.explorer.indexed_count()
+                ),
+                Style::default().fg(theme::AMBER),
+            ));
+        } else if let Some(error) = &app.explorer.error {
+            spans.push(Span::styled(error, Style::default().fg(theme::AMBER)));
         } else if app.file_search_query.is_empty()
             && app.content_search_query.is_empty()
             && app.preview_search_query.is_empty()
@@ -637,7 +654,7 @@ fn draw_shortcuts(frame: &mut Frame, app: &App, area: Rect) {
             ("F1", "help"),
             ("Space Space", "files"),
             ("T", "TODOs"),
-            ("g", "Git"),
+            ("gb", "Git"),
             ("/", "find"),
             ("Ctrl+P", "preview"),
             ("t", "theme"),
@@ -661,7 +678,7 @@ fn draw_shortcuts(frame: &mut Frame, app: &App, area: Rect) {
             ),
             ("Space Space", "files"),
             ("T", "TODOs"),
-            ("g", "Git"),
+            ("gb", "Git"),
             ("t", "theme"),
             ("Tab", "files"),
             ("↑↓", "scroll"),
@@ -717,9 +734,9 @@ pub(crate) fn popup_area(frame: &Frame, width: u16, height: u16) -> Rect {
 fn draw_search_popup(frame: &mut Frame, app: &mut App) {
     let (title, query, placeholder, accent, other_filter) = match app.mode {
         AppMode::FileSearch => (
-            "FILENAME SEARCH",
+            "FUZZY FILE / FOLDER SEARCH",
             app.file_search_query.as_str(),
-            "Type a filename or path…",
+            "Fuzzy path · end with / for folders…",
             theme::GREEN,
             if app.content_search_query.is_empty() {
                 String::new()
@@ -785,18 +802,34 @@ fn draw_search_popup(frame: &mut Frame, app: &mut App) {
     let count = app.explorer.visible_items.len();
     let filtering = !app.file_search_query.is_empty() || !app.content_search_query.is_empty();
     let count_label = match (filtering, count) {
-        (true, 1) => "matching file",
-        (true, _) => "matching files",
+        (true, 1) => "matching entry",
+        (true, _) => "matching entries",
         (false, 1) => "entry",
         (false, _) => "entries",
     };
     frame.render_widget(
-        Paragraph::new(format!(" {count} {count_label}{other_filter}"))
-            .style(Style::default().fg(theme::MUTED)),
+        Paragraph::new(format!(
+            " {count} {count_label}{other_filter}{}",
+            if app.explorer.loading() {
+                " · indexing/searching…"
+            } else {
+                ""
+            }
+        ))
+        .style(Style::default().fg(theme::MUTED)),
         summary,
     );
     if count == 0 {
-        draw_empty(frame, results, "No files found", "Try another search");
+        draw_empty(
+            frame,
+            results,
+            if app.explorer.loading() {
+                "Searching all paths…"
+            } else {
+                "No files or folders found"
+            },
+            "Try another search",
+        );
     } else {
         draw_entries(frame, app, results, true);
     }
@@ -1157,6 +1190,7 @@ mod tests {
 
     fn press(app: &mut App, code: KeyCode) {
         app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        crate::explorer::tests::finish_app(app);
     }
 
     fn open_filename_search(app: &mut App) {
@@ -1195,9 +1229,9 @@ mod tests {
             press(&mut app, KeyCode::Esc);
         }
         press(&mut app, KeyCode::Enter);
-        assert!(!app.explorer.collapsed_dirs.contains(&folder));
-        press(&mut app, KeyCode::Enter);
         assert!(app.explorer.collapsed_dirs.contains(&folder));
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.explorer.collapsed_dirs.contains(&folder));
     }
 
     #[test]
@@ -1293,8 +1327,8 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
         let rendered = screen(&terminal);
-        assert!(rendered.contains("FILENAME SEARCH"));
-        assert!(rendered.contains("1 matching file"));
+        assert!(rendered.contains("FUZZY FILE / FOLDER SEARCH"));
+        assert!(rendered.contains("1 matching entry"));
         assert!(rendered.contains("install.ps1"));
         let cursor = terminal.backend_mut().get_cursor_position().unwrap();
         assert_eq!((cursor.x, cursor.y), (25, 7));
@@ -1308,8 +1342,8 @@ mod tests {
         }
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
         let rendered = screen(&terminal);
-        assert!(rendered.contains("No files found"));
-        assert!(rendered.contains("0 matching files"));
+        assert!(rendered.contains("No files or folders found"));
+        assert!(rendered.contains("0 matching entries"));
         let cursor = terminal.backend_mut().get_cursor_position().unwrap();
         assert_eq!((cursor.x, cursor.y), (98, 7));
         press(&mut app, KeyCode::F(1));

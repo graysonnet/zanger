@@ -25,6 +25,13 @@ pub fn draw(frame: &mut Frame, todos: &mut TodoExplorer, show_cursor: bool) {
         Constraint::Length(1),
     ])
     .areas(area);
+    todos.viewport_rows = if todos.preview_focus {
+        usize::from(body.height.saturating_sub(5))
+    } else {
+        // Every result occupies a path row and a source row.
+        usize::from(body.height.saturating_sub(3)) / 2
+    }
+    .max(1);
     let title = vec![
         Line::from(vec![
             Span::styled(
