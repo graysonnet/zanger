@@ -11,6 +11,7 @@ pub const SECTIONS: &[KeySection] = &[
             ("F1", "Show or close this hotkey guide"),
             ("t", "Choose a syntax theme (normal mode)"),
             ("g", "Review Git changes against a target branch"),
+            ("T (Shift+T)", "Open Todo Explorer for workspace TODOs"),
             ("Tab", "Switch between files and preview"),
             (
                 "Alt+Left / Alt+Right",
@@ -81,6 +82,28 @@ pub const SECTIONS: &[KeySection] = &[
             ("n / N", "Next / previous diff hunk (wraps)"),
             ("Ctrl+P", "Toggle full diff preview"),
             ("Esc / g", "Return to explorer; Esc closes popup first"),
+        ],
+    },
+    KeySection {
+        title: "TODO EXPLORER",
+        keys: &[
+            ("f", "Filter TODO results by path or text"),
+            (
+                "Type / Backspace",
+                "Edit the active filter or preview query",
+            ),
+            ("Enter / Esc (input)", "Close input, keeping the query"),
+            ("Up / k, Down / j", "Select a TODO or scroll the preview"),
+            ("Tab / Enter", "Switch pane / focus the selected TODO"),
+            ("/", "Find text inside the selected file preview"),
+            ("n / N", "Next / previous TODO, or preview search match"),
+            ("r", "Rescan workspace for added or changed TODOs"),
+            ("PageUp / PageDown", "Move ten results or preview lines"),
+            ("Home / End", "First / last result or preview line"),
+            ("Left / h, Right / l", "Pan the preview horizontally"),
+            ("Alt+Left / Alt+Right", "Shrink / widen the focused pane"),
+            ("Ctrl+P", "Toggle full file preview"),
+            ("Esc / T", "Return to explorer; Esc closes input/full first"),
         ],
     },
     KeySection {

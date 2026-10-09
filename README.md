@@ -2,7 +2,7 @@
 
 Zanger is a fast, read-only terminal file explorer written in Rust. Browse your workspace in a compact sidebar, read syntax-highlighted code, and search across files while respecting `.gitignore`.
 
-See the [v1.4.0 release notes](docs/releases/v1.4.0.md) for Git review, search and preview updates, pane resizing, and shortcut changes.
+See the [v1.5.0 release notes](docs/releases/v1.5.0.md) for Todo Explorer, live scan results, and faster workspace scanning.
 
 ## UI Preview
 
@@ -20,6 +20,7 @@ When both panes are visible, `Alt+Left` shrinks the focused pane and `Alt+Right`
 - **Theme Picker** (`t`) — Eight syntax themes with live preview and a saved preference.
 - **Hotkey Guide** (`F1`) — A scrollable keyboard reference, available from any screen.
 - **Git Review** (`g`) — Choose a merge target branch and review changed files with colored unified diffs, or inspect local working-tree changes.
+- **Todo Explorer** (`T`) — List TODO lines across the workspace, filter by path or text, and jump to each match in a syntax-highlighted preview.
 - **File Name Search** (`Space` then `Space`) — Open a centered popup with live results filtered by path.
 - **Find in File** (`/`) — Search the current preview with live highlights and matching-line navigation, preserving workspace filters and file selection.
 - **Content Search** (`?`) — Search inside files from a popup, powered by `rayon` parallel processing and `bstr` byte matching.
@@ -80,6 +81,30 @@ Choose **Working tree**, or press `w` in the review, to see combined staged and 
 
 Git operations run in background workers; loading and errors appear in the review. Committed comparisons use fixed commit IDs until refreshed. Working-tree diffs read current local files; press `r` after external edits. Each displayed diff is limited to 20,000 lines or 2 MiB of text, with a **partial diff** label and partial line counts when truncated. Zanger does not fetch, check out branches, stage, commit, or merge. Returning to the explorer preserves your file selection, search filters, and preview position.
 
+## Todo Explorer
+
+Press `T` (`Shift+T`) in normal mode to scan the workspace for TODOs. The results show each matching line with its relative file path, line number, and source text. Selecting a result previews its file at that line, using your selected syntax theme. The scan covers the workspace independently of existing search filters and collapsed folders.
+
+Matches are case-insensitive whole-word `TODO` markers, including `TODO:`, `TODO(owner)`, and `todo`. Each matching source line appears once, even if it contains several markers. All UTF-8 text files are eligible, including comments, strings, and documentation. Scanning respects `.gitignore` and `.ignore`, includes non-ignored hidden files, excludes `.git` metadata, and does not follow file or directory symlinks. Binary, non-UTF-8, and files over 10 MiB are skipped; skipped files and scan errors are reported in the status bar.
+
+| Key in Todo Explorer | Action |
+|----------------------|--------|
+| `f` | Edit a case-insensitive filter against file paths and source text |
+| `Up` / `Down`, `k` / `j` | Select a TODO or scroll the focused preview |
+| `Tab` / `Enter` | Switch pane / focus the selected TODO's preview |
+| `/` | Search inside the selected file preview |
+| `n` / `N` | Next / previous TODO; navigate matching lines when a preview query is active |
+| `r` | Rescan after external edits, including new and deleted files |
+| `PageUp` / `PageDown`, `Home` / `End` | Move through results or preview lines |
+| `Left` / `Right`, `h` / `l` | Pan the focused preview horizontally |
+| `Alt+Left` / `Alt+Right` | Shrink / widen the focused pane |
+| `Ctrl+P` | Toggle full file preview |
+| `Esc` | Close input or full preview first, then return to the file explorer |
+| `T` | Return to the file explorer |
+| `F1` | Open the hotkey guide |
+
+While editing a filter or preview query, letters are entered as text, `Up` / `Down` navigates results or matches, and `Enter` / `Esc` closes the input while retaining the query. Scanning uses up to four background workers and shows results and file counts as they arrive. Binary files are rejected as soon as a NUL byte is read. Leaving cancels the scan; refreshing replaces the previous scan and retains the filter and selected path/line if it still exists. Incoming results preserve your selection and preview position once you start navigating. Returning to the file explorer restores your original selection, filters, folds, and preview position.
+
 ## Syntax themes
 
 ![Syntax theme picker with a live PowerShell preview](docs/images/themes.png)
@@ -113,6 +138,7 @@ Press `F1` at any time for the in-app hotkey guide, or run `zanger --help`. In t
 | `q` | Quit |
 | `F1` | Show or close the hotkey guide |
 | `g` | Open Git review and choose a merge target |
+| `T` (`Shift+T`) | Open Todo Explorer |
 | `t` | Open the syntax theme picker (normal mode) |
 | `Tab` | Switch focus between file list and content pane |
 | `Alt+Left` / `Alt+Right` | Shrink / widen the focused pane by 4 columns |

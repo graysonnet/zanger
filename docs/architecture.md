@@ -16,6 +16,9 @@ src/
 ├── git.rs       # Git discovery, comparisons, and unified diff parsing
 ├── git_review.rs # Background jobs and Git review interaction
 ├── git_ui.rs    # Branch picker, change list, and diff rendering
+├── todo.rs      # Read-only workspace TODO scanning and result metadata
+├── todo_explorer.rs # Cancellable scans, filtering, and TODO navigation
+├── todo_ui.rs   # TODO result list and source preview
 ├── explorer.rs  # Filesystem Interaction and Search Filtering
 └── syntax.rs    # Content parsing and Syntax Highlighting
 ```
@@ -35,6 +38,12 @@ Acts as the central "Brain".
 - Uses `/` for a separate preview query against cached file content, without filtering the explorer or reloading the selected file. Preview matches take precedence over workspace content highlights and clear when a file is loaded.
 - Uses Ctrl+P to toggle full preview, preserving scroll and the previous pane focus. Help and theme overlays consume keys first; Escape closes search before returning from full preview, and clears preview search before workspace filters in the normal layout.
 - Owns an optional `GitReview` entered with `g`. The review has independent navigation state; leaving it restores the explorer without reloading files or clearing queries.
+- Owns an optional `TodoExplorer` entered with `T`. It keeps separate result, preview, input, and pane state so leaving it preserves the original file explorer. Help takes precedence over TODO key handling.
+
+### `todo.rs`, `todo_explorer.rs`, and `todo_ui.rs`
+- `todo.rs` scans the workspace with `ignore::WalkBuilder::build_parallel`, using up to four workers independently of explorer folds and filters. It respects ignore rules, includes hidden files, excludes `.git`, skips symlinks, and only reads regular UTF-8 text files up to 10 MiB. Workers reuse read buffers, reject binary files at the first NUL-containing chunk, check cancellation between reads, and bound reads if files grow. A case-insensitive whole-word regex searches complete buffers with its literal prefilter; source line numbers are computed only for matching files. Each source line appears once. Workers publish the first match immediately, then batches at 100 ms or 128 files, plus remaining results at completion. Scan statistics report skipped files and read/walk errors.
+- `todo_explorer.rs` receives scan batches through a bounded channel polled by `main.rs` every 100 ms, draining at most 32 messages per poll to preserve keyboard responsiveness. It merges and sorts results incrementally while preserving the selected path/line and preview query/scroll across updates. Dropping or replacing a pending request sets its cancellation flag and disconnects the receiver to unblock producers. Only the current request can update results. Refresh retains the current filter and selected path/line when possible and invalidates cached preview content on its first batch. Filtering searches cached lowercase paths and snippets without rereading files; selecting another TODO in the same file reuses highlighted content.
+- `todo_ui.rs` renders the result count, relative paths, line numbers, source snippets, loading/errors/empty states, and selected source line. It uses the shared `ui::draw_code` renderer for syntax themes, search highlights, line numbers, horizontal scrolling, and scrollbars. `f` edits the result filter; `/` edits a separate preview query. The view has its own `PaneSplit`, supports Ctrl+P, and shows the focused pane alone on narrow terminals.
 
 ### `git.rs`, `git_review.rs`, and `git_ui.rs`
 - `git.rs` invokes the installed Git executable with structured arguments, literal pathspecs, NUL-separated change records, optional index locks disabled, and external diff/text conversion disabled. It discovers worktrees from nested directories and lists local/remote-tracking branch refs, excluding symbolic aliases.

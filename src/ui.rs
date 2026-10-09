@@ -12,11 +12,18 @@ use ratatui::{
 use crate::{
     app::{App, AppMode, PaneFocus},
     help,
-    syntax::SYNTAX_THEMES,
+    syntax::{SYNTAX_THEMES, SyntaxHighlighter},
     theme,
 };
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    if let Some(todos) = &mut app.todo_explorer {
+        crate::todo_ui::draw(frame, todos, !app.help_open);
+        if app.help_open {
+            draw_help(frame, app);
+        }
+        return;
+    }
     if let Some(review) = &mut app.git_review {
         crate::git_ui::draw(frame, review, !app.help_open);
         if app.help_open {
@@ -312,12 +319,8 @@ fn draw_file_content(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    let [path_row, code_area, info_row] = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(inner);
+    let [path_row, code_area] =
+        Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
     let relative = item
         .path
         .strip_prefix(&app.explorer.root)
@@ -328,20 +331,49 @@ fn draw_file_content(frame: &mut Frame, app: &mut App, area: Rect) {
         path_row,
     );
 
+    draw_code(
+        frame,
+        CodePreview {
+            highlighter: &app.highlighter,
+            scroll: app.content_scroll,
+            horizontal_scroll: app.content_horizontal_scroll,
+            query: app.preview_query(),
+            selected_line: None,
+        },
+        code_area,
+        area,
+    );
+}
+
+pub(crate) struct CodePreview<'a> {
+    pub highlighter: &'a SyntaxHighlighter,
+    pub scroll: usize,
+    pub horizontal_scroll: u16,
+    pub query: &'a str,
+    pub selected_line: Option<usize>,
+}
+
+pub(crate) fn draw_code(frame: &mut Frame, preview: CodePreview<'_>, area: Rect, panel_area: Rect) {
+    let [code_area, info_row] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
+    let total = preview.highlighter.current_lines.len();
+
     let line_digits = total.to_string().len().max(3) as u16;
     let [gutter, code] =
         Layout::horizontal([Constraint::Length(line_digits + 2), Constraint::Min(0)])
             .areas(code_area);
-    let start = app.content_scroll;
+    let start = preview.scroll.min(total.saturating_sub(1));
     let end = (start + usize::from(code.height)).min(total);
-    let match_lines = app.highlighter.find_match_lines(app.preview_query());
-    let gutter_style = app.highlighter.gutter_style();
+    let match_lines = preview.highlighter.find_match_lines(preview.query);
+    let gutter_style = preview.highlighter.gutter_style();
 
     let numbers: Vec<Line> = (start..end)
         .map(|index| {
             Line::from(Span::styled(
                 format!("{:>width$} ", index + 1, width = usize::from(line_digits)),
-                if match_lines.binary_search(&index).is_ok() {
+                if preview.selected_line == Some(index) {
+                    gutter_style.fg(theme::BACKGROUND).bg(theme::AMBER).bold()
+                } else if match_lines.binary_search(&index).is_ok() {
                     gutter_style.fg(theme::AMBER).bg(theme::MATCH_BACKGROUND)
                 } else {
                     gutter_style
@@ -358,9 +390,7 @@ fn draw_file_content(frame: &mut Frame, app: &mut App, area: Rect) {
         gutter,
     );
 
-    let highlighted = app
-        .highlighter
-        .get_lines_with_highlight(app.preview_query());
+    let highlighted = preview.highlighter.get_lines_with_highlight(preview.query);
     let text: Vec<Line> = highlighted
         .into_iter()
         .skip(start)
@@ -383,14 +413,14 @@ fn draw_file_content(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
     frame.render_widget(
         Paragraph::new(text)
-            .style(app.highlighter.code_style())
-            .scroll((0, app.content_horizontal_scroll)),
+            .style(preview.highlighter.code_style())
+            .scroll((0, preview.horizontal_scroll)),
         code,
     );
 
     let info = Line::from(vec![
         Span::styled(
-            format!(" {} ", app.highlighter.language),
+            format!(" {} ", preview.highlighter.language),
             Style::default().fg(theme::ACCENT),
         ),
         Span::styled(
@@ -398,7 +428,7 @@ fn draw_file_content(frame: &mut Frame, app: &mut App, area: Rect) {
             Style::default().fg(theme::MUTED),
         ),
         Span::styled(
-            format!("  ·  {}", app.highlighter.theme_name()),
+            format!("  ·  {}", preview.highlighter.theme_name()),
             Style::default().fg(theme::MUTED),
         ),
     ]);
@@ -418,7 +448,7 @@ fn draw_file_content(frame: &mut Frame, app: &mut App, area: Rect) {
         let mut state = ScrollbarState::new(total)
             .position(start)
             .viewport_content_length(usize::from(code.height));
-        let scrollbar_area = Rect::new(area.x, code.y, area.width, code.height);
+        let scrollbar_area = Rect::new(panel_area.x, code.y, panel_area.width, code.height);
         frame.render_stateful_widget(scrollbar, scrollbar_area, &mut state);
     }
 }
@@ -606,6 +636,7 @@ fn draw_shortcuts(frame: &mut Frame, app: &App, area: Rect) {
         vec![
             ("F1", "help"),
             ("Space Space", "files"),
+            ("T", "TODOs"),
             ("g", "Git"),
             ("/", "find"),
             ("Ctrl+P", "preview"),
@@ -629,6 +660,7 @@ fn draw_shortcuts(frame: &mut Frame, app: &App, area: Rect) {
                 },
             ),
             ("Space Space", "files"),
+            ("T", "TODOs"),
             ("g", "Git"),
             ("t", "theme"),
             ("Tab", "files"),

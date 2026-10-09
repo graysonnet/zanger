@@ -4,6 +4,7 @@ use crate::{
     panes::{PaneSplit, resize_direction},
     settings,
     syntax::{SYNTAX_THEMES, SyntaxHighlighter},
+    todo_explorer::TodoExplorer,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
@@ -48,6 +49,7 @@ pub struct App {
     pub help_scroll: u16,
     pub notice: Option<String>,
     pub git_review: Option<GitReview>,
+    pub todo_explorer: Option<TodoExplorer>,
     theme_path: Option<PathBuf>,
 }
 
@@ -85,6 +87,7 @@ impl App {
             help_scroll: 0,
             notice: None,
             git_review: None,
+            todo_explorer: None,
             theme_path,
         };
         if let Some(index) = app.theme_path.as_deref().and_then(settings::load_theme) {
@@ -162,6 +165,14 @@ impl App {
             return;
         }
         self.notice = None;
+        if let Some(todos) = &mut self.todo_explorer {
+            if key.code == KeyCode::Char('q') && todos.input.is_none() {
+                self.should_quit = true;
+            } else if todos.handle_key(key) {
+                self.todo_explorer = None;
+            }
+            return;
+        }
         if let Some(review) = &mut self.git_review {
             if key.code == KeyCode::Char('q') && !review.picker_open {
                 self.should_quit = true;
@@ -196,6 +207,12 @@ impl App {
         match self.mode {
             AppMode::Normal => {
                 match key.code {
+                    KeyCode::Char('T') => {
+                        self.todo_explorer = Some(TodoExplorer::new(
+                            self.explorer.root.clone(),
+                            self.highlighter.theme_index(),
+                        ));
+                    }
                     KeyCode::Char('g') => {
                         self.git_review = Some(GitReview::new(self.explorer.root.clone()))
                     }

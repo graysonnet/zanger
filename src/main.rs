@@ -16,6 +16,9 @@ mod panes;
 mod settings;
 mod syntax;
 mod theme;
+mod todo;
+mod todo_explorer;
+mod todo_ui;
 mod ui;
 
 use app::App;
@@ -106,9 +109,14 @@ fn run_app(
         if let Some(review) = &mut app.git_review {
             review.poll();
         }
+        if let Some(todos) = &mut app.todo_explorer {
+            todos.poll();
+        }
         terminal.draw(|f| ui::draw(f, app))?;
 
-        if app.git_review.is_some() && !event::poll(std::time::Duration::from_millis(100))? {
+        if (app.git_review.is_some() || app.todo_explorer.is_some())
+            && !event::poll(std::time::Duration::from_millis(100))?
+        {
             continue;
         }
         let ev = event::read()?;
