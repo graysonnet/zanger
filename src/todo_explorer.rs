@@ -278,7 +278,7 @@ impl TodoExplorer {
         {
             self.remember_scan_selection();
         }
-        if let Some(grow) = resize_direction(key) {
+        if let Some(grow) = resize_direction(key, self.pane_split.stacked()) {
             self.vim.reset();
             if !self.full_preview && self.input != Some(Input::Filter) {
                 self.pane_split.resize(grow, self.preview_focus);
@@ -347,6 +347,10 @@ impl TodoExplorer {
         }
         if let Some(action) = self.vim.handle(key) {
             match action {
+                Action::Split(orientation) => {
+                    self.full_preview = false;
+                    self.pane_split.set_orientation(orientation);
+                }
                 Action::PaneLeft | Action::PaneRight | Action::PaneNext => {
                     self.full_preview = false;
                     self.preview_focus = match action {
@@ -818,6 +822,27 @@ mod tests {
         assert!(!app.todo_explorer.as_ref().unwrap().preview_focus);
         terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
         assert_eq!(divider(&terminal), original);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Char('s'));
+        terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+        assert!(app.todo_explorer.as_ref().unwrap().pane_split.stacked());
+        assert!(app.todo_explorer.as_ref().unwrap().viewport_rows < 8);
+        let borders: Vec<_> = (0..30)
+            .filter(|&y| terminal.backend().buffer()[(0, y)].symbol() == "╭")
+            .collect();
+        assert_eq!(borders.len(), 2);
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
+        terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, borders[1] + 2)].symbol(),
+            "╭"
+        );
+        press(&mut app, KeyCode::Char('f'));
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Char('v'));
+        assert_eq!(app.todo_explorer.as_ref().unwrap().filter, "v");
+        assert!(app.todo_explorer.as_ref().unwrap().pane_split.stacked());
 
         for (width, height) in [(0, 0), (1, 1), (24, 8), (60, 20), (120, 30)] {
             for preview in [false, true] {

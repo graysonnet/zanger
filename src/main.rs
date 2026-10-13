@@ -1,5 +1,8 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
+    event::{
+        self, DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture,
+        Event, KeyEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -7,12 +10,15 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{env, error::Error, io, path::PathBuf, process};
 
 mod app;
+mod codex_pane;
+mod codex_session;
 mod explorer;
 mod fuzzy;
 mod git;
 mod git_review;
 mod git_ui;
 mod help;
+mod mcp;
 mod panes;
 mod settings;
 mod syntax;
@@ -35,6 +41,8 @@ fn print_help() {
     println!();
     println!("USAGE:");
     println!("    zanger [PATH]");
+    println!("    zanger --mcp");
+    println!("    zanger --codex [PATH] [-- CODEX_ARGS...]");
     println!();
     println!("ARGUMENTS:");
     println!("    PATH    Directory to explore (defaults to current directory)");
@@ -42,6 +50,8 @@ fn print_help() {
     println!("OPTIONS:");
     println!("    -h, --help       Print this help message");
     println!("    -v, --version    Print version");
+    println!("    --mcp            Serve read-only workspace tools over MCP stdio");
+    println!("    --codex          Run Codex with an Alt+Z file/Git popup (requires Zellij)");
     println!();
     for section in help::SECTIONS {
         println!("{}:", section.title);
@@ -54,9 +64,30 @@ fn print_help() {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("--codex") => return codex_pane::launch(&args[2..]),
+        Some("--codex-child") => return codex_pane::run_codex(env::args_os().skip(2)),
+        Some("--codex-notify") if args.len() == 4 => {
+            return codex_session::notify(std::path::Path::new(&args[2]), &args[3])
+                .map_err(Into::into);
+        }
+        _ => {}
+    }
+    if args.get(1).is_some_and(|arg| arg == "--mcp") {
+        if args.len() != 2 {
+            return Err(
+                "--mcp takes no path; each tool call requires an absolute workspace".into(),
+            );
+        }
+        return mcp::serve(io::stdin().lock(), io::stdout().lock()).map_err(Into::into);
+    }
     let mut path = PathBuf::from(".");
+    let popup = args.get(1).is_some_and(|arg| arg == "--codex-popup");
+    if popup && env::var_os("ZELLIJ").is_none() {
+        return Err("--codex-popup is internal; use zanger --codex".into());
+    }
 
-    for arg in &args[1..] {
+    for arg in &args[if popup { 2 } else { 1 }..] {
         match arg.as_str() {
             "-h" | "--help" => {
                 print_help();
@@ -76,23 +107,39 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    let codex_source = if popup {
+        Some(codex_session::Source::from_environment(path.clone())?)
+    } else {
+        None
+    };
+
     // setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableFocusChange
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     // create app and run it
     let mut app = App::new(path);
-    let res = run_app(&mut terminal, &mut app);
+    if popup {
+        app.codex_source = codex_source;
+        app.open_codex_turn();
+    }
+    let res = run_app(&mut terminal, &mut app, popup);
 
     // restore terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableMouseCapture
+        DisableMouseCapture,
+        DisableFocusChange
     )?;
     terminal.show_cursor()?;
 
@@ -106,6 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn run_app(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     app: &mut App,
+    popup: bool,
 ) -> io::Result<()> {
     loop {
         app.poll_explorer();
@@ -117,12 +165,18 @@ fn run_app(
         }
         terminal.draw(|f| ui::draw(f, app))?;
 
-        if (app.git_review.is_some() || app.todo_explorer.is_some() || app.explorer.loading())
+        if (popup
+            || app.git_review.is_some()
+            || app.todo_explorer.is_some()
+            || app.explorer.loading())
             && !event::poll(std::time::Duration::from_millis(100))?
         {
             continue;
         }
         let ev = event::read()?;
+        if popup && ev == Event::FocusGained {
+            app.open_codex_turn();
+        }
 
         if let Event::Key(key) = ev
             && key.kind == KeyEventKind::Press
@@ -131,6 +185,11 @@ fn run_app(
         }
 
         if app.should_quit {
+            if popup {
+                app.should_quit = false;
+                codex_pane::hide_popup()?;
+                continue;
+            }
             return Ok(());
         }
     }

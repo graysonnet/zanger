@@ -6,6 +6,21 @@ pub struct KeySection {
 // Shared by the in-app guide and --help so they describe the same controls.
 pub const SECTIONS: &[KeySection] = &[
     KeySection {
+        title: "CODEX POPUP (zanger --codex)",
+        keys: &[
+            ("Alt+Z", "Open last-turn changes / hide popup"),
+            ("F2", "Return to last Codex turn and refresh"),
+            ("Esc", "Leave turn changes and browse files"),
+            (
+                "b (turn changes)",
+                "Open Git review for all local/branch changes",
+            ),
+            ("r", "Refresh recorded patches for the last turn"),
+            ("Tab / Ctrl+P", "Switch pane / toggle full diff"),
+            ("q", "Hide popup and return to Codex"),
+        ],
+    },
+    KeySection {
         title: "GENERAL",
         keys: &[
             ("F1", "Show or close this hotkey guide"),
@@ -13,10 +28,13 @@ pub const SECTIONS: &[KeySection] = &[
             ("g then b", "Review Git changes against a target branch"),
             ("T (Shift+T)", "Open Todo Explorer for workspace TODOs"),
             ("Tab", "Switch between files and preview"),
+            ("Ctrl+W then v", "Vertical split: files left, preview right"),
+            ("Ctrl+W then s", "Horizontal split: files above preview"),
             (
                 "Alt+Left / Alt+Right",
-                "Shrink / widen the focused pane by 4 columns",
+                "Shrink / grow focused pane (4 columns or 2 rows)",
             ),
+            ("Alt+Up / Alt+Down", "Shrink / grow stacked pane by 2 rows"),
             ("q", "Quit (normal mode)"),
         ],
     },
@@ -38,7 +56,11 @@ pub const SECTIONS: &[KeySection] = &[
             ("gg / G", "First / last item or preview line"),
             ("Ctrl+U / Ctrl+D", "Move up / down half the visible pane"),
             ("Ctrl+B / Ctrl+F", "Move up / down a full visible pane"),
-            ("Ctrl+W then h / l", "Focus left / right pane"),
+            (
+                "Ctrl+W then h / l",
+                "Focus left / right pane (top / bottom if stacked)",
+            ),
+            ("Ctrl+W then k / j", "Focus top / bottom pane"),
             ("Ctrl+W then w", "Switch pane"),
             ("gb", "Open / leave Git review (g is a prefix)"),
             ("Esc", "Cancel an unfinished key sequence"),
@@ -88,7 +110,7 @@ pub const SECTIONS: &[KeySection] = &[
             ("Tab / Enter", "Switch pane / focus the diff"),
             (
                 "Alt+Left / Alt+Right",
-                "Shrink / widen the focused pane by 4 columns",
+                "Shrink / grow focused pane (4 columns or 2 rows)",
             ),
             ("Up / k, Down / j", "Select a file or scroll the diff"),
             ("PageUp / PageDown", "Scroll the diff ten lines"),

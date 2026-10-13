@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "zanger": {
+      "command": "zanger",
+      "args": ["--mcp"]
+    }
+  }
+}

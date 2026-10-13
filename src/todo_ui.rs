@@ -25,13 +25,6 @@ pub fn draw(frame: &mut Frame, todos: &mut TodoExplorer, show_cursor: bool) {
         Constraint::Length(1),
     ])
     .areas(area);
-    todos.viewport_rows = if todos.preview_focus {
-        usize::from(body.height.saturating_sub(5))
-    } else {
-        // Every result occupies a path row and a source row.
-        usize::from(body.height.saturating_sub(3)) / 2
-    }
-    .max(1);
     let title = vec![
         Line::from(vec![
             Span::styled(
@@ -54,21 +47,30 @@ pub fn draw(frame: &mut Frame, todos: &mut TodoExplorer, show_cursor: bool) {
         )),
     ];
     frame.render_widget(Paragraph::new(title), header);
-    if todos.full_preview || (body.width < 78 && todos.preview_focus) {
+    let mut focused = body;
+    if todos.full_preview {
         todos.pane_split.hide();
         draw_preview(frame, todos, body, show_cursor);
-    } else if body.width < 78 {
-        todos.pane_split.hide();
-        draw_results(frame, todos, body, show_cursor);
-    } else {
-        let width = todos
+    } else if let Some([list, preview]) =
+        todos
             .pane_split
-            .left_width(body.width, (body.width / 3).clamp(28, 46));
-        let [list, preview] =
-            Layout::horizontal([Constraint::Length(width), Constraint::Min(0)]).areas(body);
+            .areas(body, (body.width / 3).clamp(28, 46), 0, 78)
+    {
+        focused = if todos.preview_focus { preview } else { list };
         draw_results(frame, todos, list, show_cursor);
         draw_preview(frame, todos, preview, show_cursor);
+    } else if todos.preview_focus {
+        draw_preview(frame, todos, body, show_cursor);
+    } else {
+        draw_results(frame, todos, body, show_cursor);
     }
+    todos.viewport_rows = if todos.preview_focus {
+        usize::from(focused.height.saturating_sub(5))
+    } else {
+        // Every result occupies a path row and a source row.
+        usize::from(focused.height.saturating_sub(3)) / 2
+    }
+    .max(1);
     let message = if todos.loading() {
         format!(
             "Scanning… {} text files · {} TODO lines · {} skipped · {} errors · Esc back",
@@ -102,12 +104,14 @@ pub fn draw(frame: &mut Frame, todos: &mut TodoExplorer, show_cursor: bool) {
     let hints = match todos.input {
         Some(Input::Filter) => " Type filter · ↑↓ select · Enter/Esc close · Ctrl+P full · F1 help",
         Some(Input::PreviewSearch) => " Type query · ↑↓ match · Enter/Esc close · F1 help",
-        None if shortcuts.width < 78 => " f filter · Tab pane · r refresh · Esc back · F1 help",
+        None if shortcuts.width < 78 => {
+            " f filter · Ctrl+W v/s split · Tab pane · Esc back · F1 help"
+        }
         None if !todos.preview_query.is_empty() => {
-            " f filter · / find · r refresh · Tab pane · Alt+←/→ size · n/N match · Ctrl+P full · Esc back · F1 help"
+            " f filter · / find · r refresh · Ctrl+W v/s split · Tab pane · n/N match · Ctrl+P full · Esc back · F1 help"
         }
         None => {
-            " f filter · / find · r refresh · Tab pane · Alt+←/→ size · n/N TODO · Ctrl+P full · Esc back · F1 help"
+            " f filter · / find · r refresh · Ctrl+W v/s split · Tab pane · n/N TODO · Ctrl+P full · Esc back · F1 help"
         }
     };
     frame.render_widget(

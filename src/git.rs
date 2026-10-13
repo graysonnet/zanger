@@ -20,6 +20,7 @@ pub struct Repository {
 pub enum Target {
     WorkingTree,
     Branch(String),
+    CodexTurn,
 }
 
 #[derive(Clone, Debug)]
@@ -50,6 +51,7 @@ pub struct Comparison {
     // Pin committed comparisons to object IDs so branch changes cannot mix snapshots.
     base: Option<String>,
     head: Option<String>,
+    recorded: Option<std::sync::Arc<Vec<Diff>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -132,6 +134,7 @@ impl Repository {
         )?;
         let local = parse_status(&status)?;
         let (base, changes, title, description) = match &target {
+            Target::CodexTurn => return Err("Codex turns use recorded patches".into()),
             Target::Branch(reference) => {
                 let head = head
                     .as_deref()
@@ -205,12 +208,42 @@ impl Repository {
             changes,
             base,
             head,
+            recorded: None,
         })
     }
 }
 
 impl Comparison {
+    pub fn recorded(
+        root: PathBuf,
+        title: String,
+        description: String,
+        files: Vec<(Change, Diff)>,
+    ) -> Self {
+        let (changes, diffs) = files.into_iter().unzip();
+        Self {
+            repository: Repository {
+                root,
+                source: "Codex".into(),
+                branches: Vec::new(),
+            },
+            target: Target::CodexTurn,
+            title,
+            description,
+            changes,
+            base: None,
+            head: None,
+            recorded: Some(std::sync::Arc::new(diffs)),
+        }
+    }
+
     pub fn diff(&self, index: usize) -> Result<Diff, String> {
+        if let Some(diffs) = &self.recorded {
+            return diffs
+                .get(index)
+                .cloned()
+                .ok_or_else(|| "No file selected".into());
+        }
         let change = self.changes.get(index).ok_or("No file selected")?;
         if change.untracked && self.repository.root.join(&change.path).is_dir() {
             return Ok(parse_diff(b"Untracked directory or embedded repository. Open it separately to review its contents.\n"));
@@ -437,7 +470,7 @@ fn display_path(path: &Path) -> String {
     display_text(&path.to_string_lossy())
 }
 
-fn parse_diff(bytes: &[u8]) -> Diff {
+pub(crate) fn parse_diff(bytes: &[u8]) -> Diff {
     let text = String::from_utf8_lossy(bytes);
     let mut diff = Diff::default();
     let (mut old, mut new) = (None, None);

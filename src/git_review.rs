@@ -1,3 +1,4 @@
+use crate::codex_session::Source;
 use crate::git::{Comparison, Diff, DiffKind, Repository, Target};
 use crate::panes::{PaneSplit, resize_direction};
 use crate::vim::{Action, VimKeys};
@@ -7,6 +8,7 @@ use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver},
     thread,
+    time::{Duration, Instant},
 };
 
 enum Loaded {
@@ -35,17 +37,38 @@ pub struct GitReview {
     pub error: Option<String>,
     pub loading: Option<&'static str>,
     pending: Option<Receiver<Result<Loaded, String>>>,
+    pub codex: Option<Source>,
+    revision: Vec<u8>,
+    checked: Instant,
+    retries: u8,
 }
 
 impl GitReview {
     pub fn new(path: PathBuf) -> Self {
-        let mut review = Self {
+        let mut review = Self::empty();
+        review.picker_open = true;
+        review.start("Reading Git branches…", move || {
+            Repository::discover(&path).map(Loaded::Repository)
+        });
+        review
+    }
+
+    pub fn codex(source: Source) -> Self {
+        // Construct without starting a Git scan; Codex history also works outside Git.
+        let mut review = Self::empty();
+        review.codex = Some(source);
+        review.refresh_codex();
+        review
+    }
+
+    fn empty() -> Self {
+        Self {
             vim: VimKeys::default(),
             viewport_rows: 20,
             repository: None,
             comparison: None,
             diff: None,
-            picker_open: true,
+            picker_open: false,
             branch_query: String::new(),
             branch_index: 0,
             branch_state: ListState::default(),
@@ -59,11 +82,26 @@ impl GitReview {
             error: None,
             loading: None,
             pending: None,
+            codex: None,
+            revision: Vec::new(),
+            checked: Instant::now(),
+            retries: 0,
+        }
+    }
+
+    pub fn refresh_codex(&mut self) {
+        let Some(source) = self.codex.clone() else {
+            return;
         };
-        review.start("Reading Git branches…", move || {
-            Repository::discover(&path).map(Loaded::Repository)
+        let revision = source.revision();
+        if revision != self.revision {
+            self.retries = 0;
+        }
+        self.revision = revision;
+        self.checked = Instant::now();
+        self.start("Reading last Codex turn…", move || {
+            source.load().map(Loaded::Comparison)
         });
-        review
     }
 
     fn start(
@@ -81,6 +119,18 @@ impl GitReview {
     }
 
     pub fn poll(&mut self) {
+        if self.pending.is_none()
+            && self.codex.is_some()
+            && self.checked.elapsed() >= Duration::from_secs(1)
+        {
+            self.checked = Instant::now();
+            if self.codex.as_ref().unwrap().revision() != self.revision
+                || (self.error.is_some() && self.retries < 3)
+            {
+                self.retries += 1;
+                self.refresh_codex();
+            }
+        }
         let Some(receiver) = &self.pending else {
             return;
         };
@@ -93,6 +143,15 @@ impl GitReview {
         };
         self.pending = None;
         self.loading = None;
+        if self
+            .codex
+            .as_ref()
+            .is_some_and(|source| source.revision() != self.revision)
+        {
+            // A newer completed turn supersedes this worker's result.
+            self.refresh_codex();
+            return;
+        }
         match result {
             Ok(Loaded::Repository(repository)) => {
                 self.branch_index = repository
@@ -110,11 +169,37 @@ impl GitReview {
                 self.repository = Some(repository);
             }
             Ok(Loaded::Comparison(comparison)) => {
+                let previous = self
+                    .comparison
+                    .as_ref()
+                    .and_then(|c| c.changes.get(self.selected))
+                    .map(|c| c.path.clone());
+                let same_turn = self.codex.is_some()
+                    && self
+                        .comparison
+                        .as_ref()
+                        .is_some_and(|c| c.description == comparison.description);
+                let position = (self.scroll, self.horizontal_scroll);
                 self.repository = Some(comparison.repository.clone());
                 self.comparison = Some(comparison);
-                self.selected = 0;
-                self.file_state = ListState::default();
+                self.selected = if self.codex.is_some() {
+                    self.comparison
+                        .as_ref()
+                        .unwrap()
+                        .changes
+                        .iter()
+                        .position(|c| Some(&c.path) == previous.as_ref())
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+                if !same_turn {
+                    self.file_state = ListState::default();
+                }
                 self.load_diff();
+                if same_turn {
+                    (self.scroll, self.horizontal_scroll) = position;
+                }
             }
             Ok(Loaded::Diff(diff)) => self.diff = Some(diff),
             Err(error) => self.error = Some(error),
@@ -156,6 +241,10 @@ impl GitReview {
         self.horizontal_scroll = 0;
         if let Some(comparison) = &self.comparison {
             if comparison.changes.is_empty() {
+                return;
+            }
+            if comparison.target == Target::CodexTurn {
+                self.diff = comparison.diff(self.selected).ok();
                 return;
             }
             let comparison = comparison.clone();
@@ -260,7 +349,7 @@ impl GitReview {
             }
             return false;
         }
-        if let Some(grow) = resize_direction(key) {
+        if let Some(grow) = resize_direction(key, self.pane_split.stacked()) {
             self.vim.reset();
             if !self.full_preview {
                 self.pane_split.resize(grow, self.preview_focus);
@@ -280,6 +369,10 @@ impl GitReview {
                 .map_or(0, |comparison| comparison.changes.len());
             match action {
                 Action::Git => return true,
+                Action::Split(orientation) => {
+                    self.full_preview = false;
+                    self.pane_split.set_orientation(orientation);
+                }
                 Action::PaneLeft | Action::PaneRight | Action::PaneNext => {
                     self.full_preview = false;
                     self.preview_focus = match action {
@@ -331,6 +424,11 @@ impl GitReview {
             }
             KeyCode::Esc => return true,
             KeyCode::Char('b') => {
+                if self.codex.is_some() {
+                    let root = self.codex.as_ref().unwrap().root.clone();
+                    *self = Self::new(root);
+                    return false;
+                }
                 self.picker_open = true;
                 self.branch_query.clear();
                 self.branch_index = 0;
@@ -344,9 +442,13 @@ impl GitReview {
                     });
                 }
             }
-            KeyCode::Char('w') if self.loading.is_none() => self.compare(Target::WorkingTree),
+            KeyCode::Char('w') if self.loading.is_none() && self.codex.is_none() => {
+                self.compare(Target::WorkingTree)
+            }
             KeyCode::Char('r') if self.loading.is_none() => {
-                if let Some(comparison) = &self.comparison {
+                if self.codex.is_some() {
+                    self.refresh_codex();
+                } else if let Some(comparison) = &self.comparison {
                     self.compare(comparison.target.clone());
                 }
             }
@@ -422,6 +524,95 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect()
+    }
+
+    #[test]
+    fn codex_refresh_keeps_position_and_renders_recorded_and_empty_turns() {
+        use crate::git::{Change, parse_diff};
+        let repo = TestRepo::new();
+        let source = Source {
+            root: repo.root.clone(),
+            marker: repo.root.join("turn.json"),
+            config_args: Vec::new(),
+            initial_thread: None,
+        };
+        let make = |description: &str, empty: bool| {
+            Comparison::recorded(
+                repo.root.clone(),
+                "Last Codex turn".into(),
+                description.into(),
+                if empty {
+                    Vec::new()
+                } else {
+                    ["a.txt", "b.txt"]
+                        .iter()
+                        .map(|path| {
+                            (
+                                Change {
+                                    status: "M".into(),
+                                    path: path.into(),
+                                    previous_path: None,
+                                    untracked: false,
+                                },
+                                parse_diff(b"@@ -1 +1 @@\n-old\n+recorded\n"),
+                            )
+                        })
+                        .collect()
+                },
+            )
+        };
+        let mut review = GitReview::empty();
+        review.codex = Some(source.clone());
+        review.comparison = Some(make("turn-1", false));
+        review.selected = 1;
+        review.load_diff();
+        review.scroll = 2;
+        review.horizontal_scroll = 4;
+        let (sender, receiver) = mpsc::channel();
+        review.pending = Some(receiver);
+        sender
+            .send(Ok(Loaded::Comparison(make("turn-1", false))))
+            .unwrap();
+        review.poll();
+        assert_eq!(
+            (review.selected, review.scroll, review.horizontal_scroll),
+            (1, 2, 4)
+        );
+        let mut app = App::with_theme_path(repo.root.clone(), None);
+        app.codex_source = Some(source);
+        app.git_review = Some(review);
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Char('s'));
+        let mut stacked = Terminal::new(TestBackend::new(120, 32)).unwrap();
+        stacked.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+        let borders: Vec<_> = (0..32)
+            .filter(|&y| stacked.backend().buffer()[(0, y)].symbol() == "╭")
+            .collect();
+        assert_eq!(borders.len(), 2);
+        assert_eq!(app.git_review.as_ref().unwrap().selected, 1);
+        assert!(app.git_review.as_ref().unwrap().viewport_rows < 20);
+        for (width, height) in [(1, 1), (40, 10), (120, 32)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+            if width == 120 {
+                assert!(screen(&terminal).contains("CODEX CHANGES"));
+            }
+        }
+        let review = app.git_review.as_mut().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        review.pending = Some(receiver);
+        sender
+            .send(Ok(Loaded::Comparison(make("turn-2", true))))
+            .unwrap();
+        review.poll();
+        assert!(review.diff.is_none());
+        assert_eq!((review.selected, review.scroll), (0, 0));
+        let mut terminal = Terminal::new(TestBackend::new(120, 32)).unwrap();
+        terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("No recorded file edits"));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.git_review.is_none());
+        assert!(app.codex_source.is_some());
     }
 
     #[test]

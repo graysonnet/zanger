@@ -52,10 +52,32 @@ pub struct App {
     pub notice: Option<String>,
     pub git_review: Option<GitReview>,
     pub todo_explorer: Option<TodoExplorer>,
+    pub codex_source: Option<crate::codex_session::Source>,
     theme_path: Option<PathBuf>,
 }
 
 impl App {
+    pub fn open_codex_turn(&mut self) {
+        if let Some(source) = &self.codex_source {
+            self.help_open = false;
+            if let Some(original) = self.theme_picker.take() {
+                self.highlighter.set_theme(original);
+            }
+            self.todo_explorer = None;
+            if let Some(review) = &mut self.git_review
+                && review.codex.is_some()
+            {
+                if review.loading.is_none() {
+                    review.refresh_codex();
+                }
+            } else {
+                self.git_review = Some(GitReview::codex(source.clone()));
+            }
+            self.vim.reset();
+            self.last_key_space = false;
+        }
+    }
+
     pub fn new(path: PathBuf) -> Self {
         Self::with_theme_path(path, settings::theme_path())
     }
@@ -91,6 +113,7 @@ impl App {
             notice: None,
             git_review: None,
             todo_explorer: None,
+            codex_source: None,
             theme_path,
         };
         if let Some(index) = app.theme_path.as_deref().and_then(settings::load_theme) {
@@ -133,6 +156,10 @@ impl App {
                 KeyCode::End => self.help_scroll = u16::MAX,
                 _ => {}
             }
+            return;
+        }
+        if key.code == KeyCode::F(2) && self.codex_source.is_some() {
+            self.open_codex_turn();
             return;
         }
         if let Some(original) = self.theme_picker {
@@ -198,7 +225,7 @@ impl App {
             }
             return;
         }
-        if let Some(grow) = resize_direction(key) {
+        if let Some(grow) = resize_direction(key, self.pane_split.stacked()) {
             self.vim.reset();
             if !self.full_preview && matches!(self.mode, AppMode::Normal | AppMode::PreviewSearch) {
                 self.pane_split
@@ -492,12 +519,15 @@ impl App {
     fn handle_vim(&mut self, action: Action) {
         match action {
             Action::Pending => {
-                self.notice = self
-                    .vim
-                    .pending()
-                    .then(|| "gg first · gb Git · za fold · zR/zM all · Ctrl+W h/l pane".into());
+                self.notice = self.vim.pending().then(|| {
+                    "gg first · gb Git · za fold · zR/zM all · Ctrl+W v/s split · h/l pane".into()
+                });
             }
             Action::Git => self.git_review = Some(GitReview::new(self.explorer.root.clone())),
+            Action::Split(orientation) => {
+                self.full_preview = false;
+                self.pane_split.set_orientation(orientation);
+            }
             Action::Top => {
                 if self.focus == PaneFocus::Content {
                     self.content_scroll = 0;

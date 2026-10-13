@@ -7,6 +7,8 @@ Zanger is structured into cleanly separated modules to ensure a responsive, main
 ```text
 src/
 ├── main.rs      # Setup and Teardown
+├── codex_pane.rs # Codex CLI launcher and persistent Zellij popup
+├── mcp.rs       # Read-only MCP stdio adapter for the Codex plugin
 ├── app.rs       # Application State and Key Handling
 ├── ui.rs        # Ratatui Rendering Logic
 ├── theme.rs     # Shared UI and search colors
@@ -57,7 +59,7 @@ Acts as the central "Brain".
 ### `ui.rs`
 Rendering layer using `ratatui`.
 - Draws a workspace header, rounded explorer and preview panels, search status, and contextual shortcuts.
-- Uses a bounded sidebar width on wide terminals and shows the focused pane alone below 78 columns. `PaneSplit` remembers the preferred left width separately from current terminal bounds. Alt+Left/Right shrinks/widens the focused pane by four columns, reversing divider movement when the right pane is focused. Explorer and Git review keep separate splits with 24-column minimum widths, retained through full preview and narrow layouts. Popup key handling takes precedence over resizing.
+- `PaneSplit::areas` provides vertical (side-by-side) and horizontal (stacked) rectangles for the explorer, Git/Codex review, and Todo Explorer. Ctrl+W then v/s selects the orientation in normal mode. Each view keeps independent width/height preferences, retained through full preview and temporary terminal resizing. Alt+Left/Right shrinks/grows the focused pane by four columns or two rows; Alt+Up/Down also resizes stacked panes. Minimum pane sizes are 24 columns or six rows. Small terminals fall back to the focused pane without losing the preferred split. Paging uses the rendered focused pane's height. Dialog and text-input handling takes precedence over split commands.
 - Retains the list viewport in `App::file_list_state` and clamps the source-line scroll position when rendering content.
 - Renders line numbers alongside unwrapped code, with horizontal scrolling, a vertical scrollbar, and language details.
 - Indents tree entries relative to `FileExplorer::root`, including when opened with an absolute path.
@@ -76,7 +78,7 @@ Defines the hotkey sections shared by the `F1` guide and `--help` output.
 
 ### `explorer.rs`
 Uses the `ignore` crate to build up a list of files that do not violate active `.gitignore` rules in the current working directory.
-- `refresh()` loads at most three levels from the workspace root, expanding the first two and leaving third-level directories collapsed. Opening a directory whose children have not been loaded reads three levels below that directory; loaded branches are reused. `all_items` contains only loaded tree entries.
+- `refresh()` loads at most three levels from the workspace root, with all folders collapsed. Opening a directory whose children have not been loaded reads three levels below that directory; its subfolders remain collapsed and loaded branches are reused. `all_items` contains only loaded tree entries. Prefetch depth is independent of visible expansion state.
 - A separate full-workspace index starts on the first search or explicit `zR` expand-all request. A cancellable background worker publishes path batches over a bounded channel. Indexing never expands the browsing tree. Filename search includes folders and uses ranked, Unicode-aware subsequences; a trailing slash restricts results to folders. Content search combines a fuzzy path filter with a literal case-insensitive text query in a background worker. Replacing the query cancels the previous request.
 - `main.rs` polls explorer jobs while active, preserves selection by path across batches, and shows progress. `r` rebuilds the tree and invalidates the index. Directory search results reveal their ancestor chain before expanding the selected folder. Search and tree traversal respect ignore rules and exclude `.git` metadata.
 - `update_visible()` chooses flat search results or the loaded tree with collapsed ancestors omitted.
@@ -92,6 +94,20 @@ The adapter for `syntect` rendering.
 ### `vim.rs`
 Parses `gg`, `gb`, `za`/`zo`/`zc`, `zR`/`zM`, Ctrl+U/D/B/F, and Ctrl+W pane sequences only in navigation modes. App, Git review, and Todo Explorer own independent parser state. Popups, text inputs, and layout shortcuts clear pending sequences. Modified letters do not fall through to plain commands. Git moved from `g` to `gb`; `za` toggles the selected folder and `zR`/`zM` act on all folders.
 
+## Codex plugin and `mcp.rs`
+
+`plugins/zanger` contains an optional Codex plugin manifest and MCP launch config, without skills. `zanger --mcp` enters a newline-delimited JSON-RPC stdio loop before initializing any terminal state. It supports MCP initialization, ping, tool discovery, and tool calls. stdout carries protocol messages only. Tools require an explicit absolute workspace, avoiding assumptions about the plugin process working directory.
+
+File tools use depth-limited `ignore` traversal for browsing and full traversal with the shared fuzzy ranker for search. Results are paginated; preview reads are bounded to 1 MiB, reject binary/non-UTF-8 content, and return numbered lines. Relative paths are checked for parent traversal and `.git` components, then canonicalized to reject symlink escapes. Git tools reuse `Repository::discover`, `compare`, and `Comparison::diff`, including the existing diff truncation and read-only Git command settings. A nested workspace discovers its containing repository, reported explicitly in results. Requests execute serially; scans use fresh filesystem state on each call.
+
+## Codex terminal popup
+The Codex launcher uses a dedicated Zellij session with a Codex pane and a hidden Zanger floating pane. `src/codex_pane.rs` generates temporary, session-local KDL that reserves only Alt+Z. Layout values are escaped as KDL strings; commands receive literal arguments without a shell. Both panes share an explicit working directory. Closing Codex closes the dedicated tab; hiding the popup preserves its App state. Generated files are removed individually on exit. This terminal integration is independent of the optional MCP plugin.
+
+`codex_session.rs` reads persisted turns through the local Codex app-server (`thread/list`, `thread/read`, `thread/turns/list`). It never resumes a thread or starts model work. Requests have 15-second deadlines and a 32 MiB message limit; recent history pagination is bounded. The owned helper shuts down through stdin EOF, with a bounded kill fallback. Config/profile arguments are shared with the helper. Session-local `notify` overrides forward any existing notifier and persist only completed turn identity. Until bound, history is explicitly labeled as the latest saved workspace session; explicit resume UUIDs bind immediately. Workspace matching guards against cross-project history.
+
+The popup uses `GitReview` with a recorded `Comparison`, backed by in-memory diffs instead of Git subprocesses. Successfully applied `fileChange` items are grouped by path, retaining patch order and rename metadata. Added/deleted full-text records become colored hunks. The existing renderer caps each diff and displays history coverage limits. Turn notification changes refresh in the background; stale workers cannot overwrite a newer marker. Focus reporting returns to last-turn review on popup opening, with F2 as an explicit shortcut. Refreshing the same turn preserves file selection and diff scroll; a new empty turn clears old edits.
+
 ## Concurrency Note
+
 The initial tree and newly opened branches use depth-limited synchronous reads. Very wide directories can still delay an expansion, but ordinary browsing no longer walks the entire workspace.
 Full-workspace path discovery and content filtering run in background workers only when requested. Todo and Git views keep their existing independent workers.

@@ -1,0 +1,28 @@
+{
+  "name": "zanger",
+  "version": "1.6.0",
+  "description": "Browse current workspace files and review local or branch Git changes with Zanger.",
+  "author": {
+    "name": "graysonnet",
+    "url": "https://github.com/graysonnet"
+  },
+  "interface": {
+    "displayName": "Zanger",
+    "shortDescription": "Explore workspace files and Git changes.",
+    "longDescription": "Browse a three-level file tree, fuzzy-search every file and folder, read source previews, and inspect local changes or committed differences against a target branch. Runs locally using Zanger and Git.",
+    "developerName": "graysonnet",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "brandColor": "#22D3EE",
+    "defaultPrompt": [
+      "Use Zanger to show files in this workspace.",
+      "Use Zanger to review my current Git changes.",
+      "Use Zanger to compare this branch against main."
+    ]
+  },
+  "mcpServers": "./.mcp.json",
+  "homepage": "https://github.com/graysonnet/zanger",
+  "repository": "https://github.com/graysonnet/zanger",
+  "license": "MIT",
+  "keywords": ["files", "git", "diff", "workspace", "powershell"]
+}

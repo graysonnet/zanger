@@ -106,7 +106,8 @@ impl FileExplorer {
                     if entry.depth() == 0 {
                         continue;
                     }
-                    if is_dir && entry.depth() == LAZY_DEPTH {
+                    // Prefetch three levels, but reveal children only when asked.
+                    if is_dir {
                         self.collapsed_dirs.insert(entry.path().to_path_buf());
                     }
                     found.push(FileItem {
@@ -442,15 +443,32 @@ pub(crate) mod tests {
                 .count()
                 <= 3
         }));
-        assert_eq!(explorer.visible_items.len(), 6);
+        assert_eq!(explorer.visible_items.len(), 2);
+        assert!(
+            explorer
+                .all_items
+                .iter()
+                .filter(|item| item.is_dir)
+                .all(|item| explorer.collapsed_dirs.contains(&item.path))
+        );
         assert!(explorer.collapsed_dirs.contains(&workspace.0.join("a/b/c")));
+        explorer.expand_dir(&workspace.0.join("a"));
+        explorer.update_visible("", "");
+        assert_eq!(explorer.visible_items.len(), 3);
+        assert!(
+            !explorer
+                .visible_items
+                .iter()
+                .any(|item| item.path.ends_with("a/b/c"))
+        );
+        explorer.expand_dir(&workspace.0.join("a/b"));
         explorer.expand_dir(&workspace.0.join("a/b/c"));
         explorer.update_visible("", "");
         assert!(
             explorer
                 .visible_items
                 .iter()
-                .any(|item| item.path.ends_with("a/b/c/d/e/f"))
+                .any(|item| item.path.ends_with("a/b/c/d"))
         );
         assert!(
             !explorer
@@ -464,7 +482,7 @@ pub(crate) mod tests {
                 .iter()
                 .any(|item| item.path.ends_with("hidden.txt"))
         );
-        explorer.expand_dir(&workspace.0.join("a/b/c/d/e/f"));
+        explorer.reveal(&workspace.0.join("a/b/c/d/e/f/deep.txt"));
         explorer.update_visible("", "");
         assert!(
             explorer
@@ -476,6 +494,9 @@ pub(crate) mod tests {
         explorer.toggle_dir(&workspace.0.join("a/b/c"));
         explorer.toggle_dir(&workspace.0.join("a/b/c"));
         assert_eq!(explorer.all_items.len(), count);
+        explorer.refresh(&workspace.0);
+        explorer.update_visible("", "");
+        assert_eq!(explorer.visible_items.len(), 2);
     }
 
     #[test]

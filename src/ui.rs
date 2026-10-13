@@ -52,7 +52,28 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         body.width.saturating_sub(2),
         body.height,
     );
-    app.viewport_rows = usize::from(body.height.saturating_sub(
+    let mut focused = body;
+    if app.full_preview {
+        app.pane_split.hide();
+        draw_file_content(frame, app, body);
+    } else if let Some([sidebar, preview]) =
+        app.pane_split
+            .areas(body, (body.width / 4).clamp(24, 38), 1, 76)
+    {
+        focused = if app.focus == PaneFocus::Content {
+            preview
+        } else {
+            sidebar
+        };
+        draw_file_list(frame, app, sidebar);
+        draw_file_content(frame, app, preview);
+    } else {
+        match app.focus {
+            PaneFocus::FileList => draw_file_list(frame, app, body),
+            PaneFocus::Content => draw_file_content(frame, app, body),
+        }
+    }
+    app.viewport_rows = usize::from(focused.height.saturating_sub(
         if app.focus == PaneFocus::Content {
             5
         } else {
@@ -60,29 +81,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         },
     ))
     .max(1);
-
-    if app.full_preview {
-        app.pane_split.hide();
-        draw_file_content(frame, app, body);
-    } else if body.width < 76 {
-        app.pane_split.hide();
-        match app.focus {
-            PaneFocus::FileList => draw_file_list(frame, app, body),
-            PaneFocus::Content => draw_file_content(frame, app, body),
-        }
-    } else {
-        let sidebar_width = app
-            .pane_split
-            .left_width(body.width - 1, (body.width / 4).clamp(24, 38));
-        let [sidebar, _, preview] = Layout::horizontal([
-            Constraint::Length(sidebar_width),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
-        .areas(body);
-        draw_file_list(frame, app, sidebar);
-        draw_file_content(frame, app, preview);
-    }
 
     draw_status(frame, app, status);
     draw_shortcuts(frame, app, shortcuts);
@@ -694,7 +692,20 @@ fn draw_shortcuts(frame: &mut Frame, app: &App, area: Rect) {
         && area.width >= 78
         && matches!(app.mode, AppMode::Normal | AppMode::PreviewSearch)
     {
-        hints.insert(1, ("Alt+←/→", "size"));
+        hints.insert(
+            1,
+            (
+                if app.pane_split.stacked() {
+                    "Alt+↑/↓"
+                } else {
+                    "Alt+←/→"
+                },
+                "size",
+            ),
+        );
+    }
+    if !app.help_open && app.theme_picker.is_none() && app.mode == AppMode::Normal {
+        hints.insert(1, ("Ctrl+W v/s", "split"));
     }
     if app.mode == AppMode::Normal
         && !app.help_open
@@ -1066,6 +1077,60 @@ mod tests {
     }
 
     #[test]
+    fn split_shortcuts_render_both_axes_and_preserve_selection_and_input() {
+        let mut app = script_app();
+        let selected = app.selected_index;
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Char('s'));
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let borders = |terminal: &Terminal<TestBackend>| {
+            (0..40)
+                .filter(|&y| terminal.backend().buffer()[(1, y)].symbol() == "╭")
+                .collect::<Vec<_>>()
+        };
+        let original = borders(&terminal);
+        assert_eq!(original.len(), 2);
+        assert!(screen(&terminal).contains("PowerShell"));
+        let rows = app.viewport_rows;
+        assert!(rows < 30);
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        assert_eq!(borders(&terminal)[1], original[1] + 2);
+        press(&mut app, KeyCode::Tab);
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        assert_eq!(borders(&terminal)[1], original[1]);
+        let scroll = app.content_scroll;
+        let rows = app.viewport_rows;
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        assert_eq!(app.content_scroll, scroll + rows);
+        ctrl_p(&mut app);
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Char('v'));
+        assert!(!app.full_preview && !app.pane_split.stacked());
+        assert_eq!(app.selected_index, selected);
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        assert_eq!(borders(&terminal).len(), 1);
+        open_filename_search(&mut app);
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Char('s'));
+        assert_eq!(app.file_search_query, "s");
+        assert!(!app.pane_split.stacked());
+        press(&mut app, KeyCode::Esc);
+        for orientation in [
+            crate::panes::Orientation::Vertical,
+            crate::panes::Orientation::Horizontal,
+        ] {
+            app.pane_split.set_orientation(orientation);
+            for (width, height) in [(0, 0), (1, 1), (24, 8), (60, 24), (120, 40)] {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn alt_arrows_resize_focused_pane_without_panning_or_changing_popups() {
         let mut app = script_app();
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
@@ -1225,13 +1290,15 @@ mod tests {
             assert!(app.focus == PaneFocus::FileList);
             assert!(app.file_search_query.is_empty());
             assert_eq!(app.explorer.collapsed_dirs, collapsed);
-            assert_eq!(app.explorer.visible_items.len(), count);
+            crate::explorer::tests::finish_app(&mut app);
+            assert!(app.explorer.visible_items.len() >= count);
             press(&mut app, KeyCode::Esc);
+            assert_eq!(app.explorer.visible_items.len(), count);
         }
         press(&mut app, KeyCode::Enter);
-        assert!(app.explorer.collapsed_dirs.contains(&folder));
-        press(&mut app, KeyCode::Enter);
         assert!(!app.explorer.collapsed_dirs.contains(&folder));
+        press(&mut app, KeyCode::Enter);
+        assert!(app.explorer.collapsed_dirs.contains(&folder));
     }
 
     #[test]

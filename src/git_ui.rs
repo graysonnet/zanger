@@ -29,15 +29,25 @@ pub fn draw(frame: &mut Frame, review: &mut GitReview, show_cursor: bool) {
         Constraint::Length(1),
     ])
     .areas(area);
-    review.viewport_rows = usize::from(body.height.saturating_sub(2)).max(1);
     let title = review
         .comparison
         .as_ref()
         .map(|comparison| comparison.title.as_str())
-        .unwrap_or("Choose a target branch");
+        .unwrap_or(if review.codex.is_some() {
+            "Last Codex turn"
+        } else {
+            "Choose a target branch"
+        });
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" GIT REVIEW  ", Style::default().fg(theme::ACCENT).bold()),
+            Span::styled(
+                if review.codex.is_some() {
+                    " CODEX CHANGES  "
+                } else {
+                    " GIT REVIEW  "
+                },
+                Style::default().fg(theme::ACCENT).bold(),
+            ),
             Span::styled(display_text(title), Style::default().fg(theme::TEXT)),
         ])),
         header,
@@ -49,32 +59,41 @@ pub fn draw(frame: &mut Frame, review: &mut GitReview, show_cursor: bool) {
                 .as_ref()
                 .map(|comparison| format!(" {}", comparison.description))
                 .unwrap_or_else(|| {
-                    " Review the current branch before merging into a selected target".into()
+                    if review.codex.is_some() {
+                        " Reading the last finished Codex turn in this workspace".into()
+                    } else {
+                        " Review the current branch before merging into a selected target".into()
+                    }
                 }),
         )
         .style(Style::default().fg(theme::MUTED))
         .wrap(Wrap { trim: false }),
         description,
     );
-    if review.full_preview || (body.width < 78 && review.preview_focus) {
+    let mut focused = body;
+    if review.full_preview {
         review.pane_split.hide();
         draw_diff(frame, review, body);
-    } else if body.width < 78 {
-        review.pane_split.hide();
-        draw_files(frame, review, body);
-    } else {
-        let files_width = review
+    } else if let Some([files, diff]) =
+        review
             .pane_split
-            .left_width(body.width, (body.width / 3).clamp(25, 42));
-        let [files, diff] =
-            Layout::horizontal([Constraint::Length(files_width), Constraint::Min(0)]).areas(body);
+            .areas(body, (body.width / 3).clamp(25, 42), 0, 78)
+    {
+        focused = if review.preview_focus { diff } else { files };
         draw_files(frame, review, files);
         draw_diff(frame, review, diff);
+    } else if review.preview_focus {
+        draw_diff(frame, review, body);
+    } else {
+        draw_files(frame, review, body);
     }
+    review.viewport_rows = usize::from(focused.height.saturating_sub(2)).max(1);
     let status_text = if let Some(error) = &review.error {
         error.clone()
     } else if let Some(loading) = review.loading {
         loading.into()
+    } else if review.codex.is_some() {
+        "Recorded patches · shell edits may be absent · b Git review".into()
     } else if review.picker_open {
         "Choose a comparison · repository remains unchanged".into()
     } else if review
@@ -91,14 +110,20 @@ pub fn draw(frame: &mut Frame, review: &mut GitReview, show_cursor: bool) {
             .style(Style::default().fg(theme::AMBER).bg(theme::SURFACE)),
         status,
     );
-    let hints = if review.picker_open {
+    let hints = if review.codex.is_some() {
+        if shortcuts.width < 78 {
+            " Esc files · Ctrl+W v/s split · Tab diff · F2 turn · F1 help"
+        } else {
+            " r refresh · Ctrl+W v/s split · Tab pane · n/N hunk · Ctrl+P full · Esc files · F2 last turn · F1 help"
+        }
+    } else if review.picker_open {
         " ↑↓ select · Type filter · Enter compare · Esc cancel · F1 help"
     } else if shortcuts.width < 78 {
-        " b branch · w local · Tab pane · Esc back · F1 help"
+        " b branch · w local · Ctrl+W v/s split · Tab pane · Esc · F1 help"
     } else if !review.full_preview {
-        " b branch · w local · r refresh · Tab pane · Alt+←/→ size · n/N hunk · Ctrl+P full · Esc back · F1 help"
+        " b branch · w local · r refresh · Ctrl+W v/s split · Tab pane · n/N hunk · Ctrl+P full · Esc back · F1 help"
     } else {
-        " b branch · w local · r refresh · Tab pane · ↑↓ move · n/N hunk · Ctrl+P full · Esc back · F1 help"
+        " b branch · w local · r refresh · Ctrl+W v/s split · ↑↓ move · n/N hunk · Ctrl+P full · Esc back · F1 help"
     };
     frame.render_widget(
         Paragraph::new(hints).style(Style::default().fg(theme::MUTED)),
@@ -201,11 +226,29 @@ fn draw_files(frame: &mut Frame, review: &mut GitReview, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let Some(comparison) = &review.comparison else {
-        draw_empty(frame, inner, "Select a comparison", "b to choose a branch");
+        draw_empty(
+            frame,
+            inner,
+            review.loading.unwrap_or("No comparison"),
+            if review.codex.is_some() {
+                "Esc files · F2 last Codex turn"
+            } else {
+                "b to choose a branch"
+            },
+        );
         return;
     };
     if count == 0 {
-        draw_empty(frame, inner, "No changes", "b branch · w local changes");
+        if review.codex.is_some() {
+            draw_empty(
+                frame,
+                inner,
+                "No recorded file edits in this turn",
+                "Esc files · b Git review · r retry",
+            );
+        } else {
+            draw_empty(frame, inner, "No changes", "b branch · w local changes");
+        }
         return;
     }
     let items: Vec<_> = comparison

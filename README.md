@@ -2,24 +2,28 @@
 
 Zanger is a fast, read-only terminal file explorer written in Rust. Browse your workspace in a compact sidebar, read syntax-highlighted code, and search across files while respecting `.gitignore`.
 
-See the [v1.5.0 release notes](docs/releases/v1.5.0.md) for Todo Explorer, live scan results, and faster workspace scanning.
+See the [v1.6.0 release notes](docs/releases/v1.6.0.md) for collapsed folders, both pane split directions, full-workspace fuzzy search, Vim navigation, and the Codex popup with last-turn changes.
 
 ## UI Preview
 
 ![Zanger showing a PowerShell script with a file sidebar, line numbers, and a compact status bar](docs/images/preview.png)
 
-A dark slate palette, cyan focus borders, and contextual keyboard hints keep the interface clear. Below 78 terminal columns, only the focused pane is shown; use `Tab` to switch between the explorer and preview.
+A dark slate palette, cyan focus borders, and contextual keyboard hints keep the interface clear. Folders start collapsed. Press `Enter` or `l` to open a folder; its subfolders stay collapsed until opened. Background prefetching still reads up to three levels, and fuzzy search includes all workspace paths.
 
-When both panes are visible, `Alt+Left` shrinks the focused pane and `Alt+Right` widens it by four columns. Use `Tab` to choose which pane to resize. Both panes keep at least 24 columns. The split is remembered while browsing or within a Git review, including after a temporary terminal resize or full preview. Popup dialogs and single-pane layouts do not resize.
+Press `Ctrl+W`, release, then `v` for a **vertical split** (files left, preview right), or `s` for a **horizontal split** (files above, preview below). These shortcuts work in normal mode in the explorer, Git review, Codex turn changes, and Todo Explorer. Side-by-side is the default. `Tab` changes focus; `Ctrl+W` then `h`/`l` or `k`/`j` focuses the first/second pane. Switching the split from full preview restores both panes.
+
+When both panes are visible, `Alt+Left` shrinks the focused pane and `Alt+Right` grows it by four columns in a vertical split or two rows in a horizontal split. Stacked panes also support `Alt+Up` / `Alt+Down` to shrink/grow by two rows. Each view remembers its chosen orientation and separate width/height preferences for the life of that view, including temporary terminal resizing and full preview. Side-by-side panes keep at least 24 columns; stacked panes keep at least six rows. Narrow terminals show only the focused pane in vertical mode, while horizontal mode can show both if there is enough height. Dialogs and single-pane layouts do not resize.
 
 ## Features
 
-- **Lazy File Tree** — Loads the first three levels at startup; expanding an unloaded branch loads three more levels. `zR` explicitly loads and expands the whole tree.
+- **Lazy File Tree** — Starts with all folders collapsed and prefetches three levels; opening an unloaded branch fetches three more levels without expanding its subfolders. `zR` explicitly loads and expands the whole tree.
+- **Vertical and Horizontal Splits** — `Ctrl+W` then `v` or `s` switches between side-by-side and stacked panes, with independent sizes and focused-pane navigation.
 - **Code Preview** — Line numbers, a scrollbar, language details, and horizontal scrolling for long lines. `Ctrl+P` toggles a full preview of the selected file.
 - **Syntax Highlighting** — Powered by `syntect` and the `two-face` syntax bundle. Includes PowerShell scripts (`.ps1`), modules (`.psm1`), and data files (`.psd1`).
 - **Theme Picker** (`t`) — Eight syntax themes with live preview and a saved preference.
 - **Hotkey Guide** (`F1`) — A scrollable keyboard reference, available from any screen.
 - **Git Review** (`gb`) — Choose a merge target branch and review changed files with colored unified diffs, or inspect local working-tree changes.
+- **Codex Terminal Popup** — Run `zanger --codex` and press `Alt+Z` to review recorded file changes from the last Codex turn. `Esc` browses files; `F2` returns to turn changes. Requires Zellij. See [setup](plugins/zanger/README.md).
 - **Todo Explorer** (`T`) — List TODO lines across the workspace, filter by path or text, and jump to each match in a syntax-highlighted preview.
 - **Fuzzy File and Folder Search** (`Space` then `Space`) — Search every workspace path, including unloaded branches. Results favor filenames, adjacent matching letters, and word boundaries; append `/` to find folders only.
 - **Find in File** (`/`) — Search the current preview with live highlights and matching-line navigation, preserving workspace filters and file selection.
@@ -55,6 +59,16 @@ zanger --help       # Show help
 zanger --version    # Show version
 ```
 
+## Codex terminal popup
+
+Run `zanger --codex [PATH]` to start Codex CLI with a Zanger popup in the same terminal. Press `Alt+Z` to open **Last Codex turn**: changed files, recorded patches, and addition/deletion counts. It refreshes when opened and after a reply completes. `Tab` focuses the diff, `Ctrl+P` expands it, and `q` or `Alt+Z` returns to Codex. Resume a conversation with `zanger --codex PATH -- resume --last`.
+
+`Esc` returns to the file explorer, where double-Space finds files and `gb` opens Git review. `F2` returns to the last-turn changes; `r` refreshes manually. The last finished turn is shown even if it contains no edits; Zanger does not silently fall back to an older turn with changes. Interrupted/failed turns are labeled and include only successfully applied patches.
+
+The view uses Codex's recorded patches, so it survives subsequent commits or file deletion. Multiple patches to a file are shown in edit order, with patch counts rather than a net Git diff. Shell commands and external tools may change files without recording a patch; press `b`, then choose **Working tree**, to review all local changes. Before the launched session completes its first reply, the popup shows the latest saved CLI session for this workspace, explicitly labeled **Latest saved session**. An explicit resume UUID selects that session immediately. Subsequent completion notifications bind the view to the attached session and turn.
+
+This uses Zellij floating panes, with an isolated session configuration that reserves only `Alt+Z`. Install Zellij and a current Codex CLI on PATH and build Zanger from source. The integration was verified with Codex 0.161.0 and Zellij 0.44.3. No skill is needed. An optional MCP plugin remains available for conversational file inspection. See [setup and usage](plugins/zanger/README.md).
+
 ## Git review
 
 Press `gb` in normal mode to review Git changes. The branch picker includes local branches, remote-tracking branches already available in your repository, and **Working tree**. Type to filter, use `Up` / `Down` to select, and press `Enter` to compare. Git must be installed and available on PATH. Opening a subdirectory discovers its containing repository and reviews the whole repository.
@@ -70,7 +84,9 @@ Choose **Working tree**, or press `w` in the review, to see combined staged and 
 | `r` | Refresh the selected comparison |
 | `Up` / `Down`, `k` / `j` | Select a changed file or scroll the focused diff |
 | `Tab` / `Enter` | Switch pane / focus the diff |
-| `Alt+Left` / `Alt+Right` | Shrink / widen the focused pane by 4 columns |
+| `Ctrl+W` then `v` / `s` | Vertical (side-by-side) / horizontal (stacked) split |
+| `Alt+Left` / `Alt+Right` | Shrink / grow the focused pane by 4 columns or 2 rows |
+| `Alt+Up` / `Alt+Down` | Shrink / grow the focused stacked pane by 2 rows |
 | `PageUp` / `PageDown`, `Home` / `End` | Scroll or jump through the diff |
 | `Left` / `Right`, `h` / `l` | Pan horizontally |
 | `n` / `N` | Jump to the next / previous diff hunk |
@@ -97,7 +113,9 @@ Matches are case-insensitive whole-word `TODO` markers, including `TODO:`, `TODO
 | `r` | Rescan after external edits, including new and deleted files |
 | `PageUp` / `PageDown`, `Home` / `End` | Move through results or preview lines |
 | `Left` / `Right`, `h` / `l` | Pan the focused preview horizontally |
-| `Alt+Left` / `Alt+Right` | Shrink / widen the focused pane |
+| `Ctrl+W` then `v` / `s` | Vertical (side-by-side) / horizontal (stacked) split |
+| `Alt+Left` / `Alt+Right` | Shrink / grow the focused pane |
+| `Alt+Up` / `Alt+Down` | Shrink / grow the focused stacked pane |
 | `Ctrl+P` | Toggle full file preview |
 | `Esc` | Close input or full preview first, then return to the file explorer |
 | `T` | Return to the file explorer |
@@ -141,7 +159,9 @@ Press `F1` at any time for the in-app hotkey guide, or run `zanger --help`. In t
 | `T` (`Shift+T`) | Open Todo Explorer |
 | `t` | Open the syntax theme picker (normal mode) |
 | `Tab` | Switch focus between file list and content pane |
-| `Alt+Left` / `Alt+Right` | Shrink / widen the focused pane by 4 columns |
+| `Ctrl+W` then `v` / `s` | Vertical (side-by-side) / horizontal (stacked) split |
+| `Alt+Left` / `Alt+Right` | Shrink / grow the focused pane by 4 columns or 2 rows |
+| `Alt+Up` / `Alt+Down` | Shrink / grow the focused stacked pane by 2 rows |
 | `Ctrl+P` | Toggle full preview of the selected file; also works from search |
 | `Esc` in full preview | Return to the previous layout |
 | `j` / `Down` | Navigate down (file list) or scroll down (content) |

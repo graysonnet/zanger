@@ -1,3 +1,4 @@
+use crate::panes::Orientation;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9,6 +10,7 @@ pub enum Action {
     PaneLeft,
     PaneRight,
     PaneNext,
+    Split(Orientation),
     Git,
     Fold,
     Open,
@@ -57,6 +59,8 @@ impl VimKeys {
                 ('w', KeyCode::Char('h' | 'k')) => Action::PaneLeft,
                 ('w', KeyCode::Char('l' | 'j')) => Action::PaneRight,
                 ('w', KeyCode::Char('w')) => Action::PaneNext,
+                ('w', KeyCode::Char('v')) => Action::Split(Orientation::Vertical),
+                ('w', KeyCode::Char('s')) => Action::Split(Orientation::Horizontal),
                 _ => Action::Pending,
             });
         }
